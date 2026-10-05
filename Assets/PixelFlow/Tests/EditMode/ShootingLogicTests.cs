@@ -51,10 +51,10 @@ namespace PixelFlow.Tests
         [Test]
         public void Step_TankWithoutExposedTarget_DoesNotFire()
         {
-            // Arrange - Grid has only color 1 exposed, tank is color 0
+            // Arrange - Color 0 at y=1 is buried behind color 1 at y=0, tank is color 0
             var palette = new Color32[] { Color.red, Color.blue };
             var tanks = new ColorTankData[] { new ColorTankData { colorId = 0, ammo = 5 } };
-            var level = TestLevels.Create(new[] { "1" }, palette, tanks, lanes: 1, slots: 5);
+            var level = TestLevels.Create(new[] { "0", "1" }, palette, tanks, lanes: 1, slots: 5);
             var session = LevelSession.Create(level);
 
             // Add tank to tray
@@ -72,6 +72,7 @@ namespace PixelFlow.Tests
             Assert.AreEqual(0, shotCount, "Should fire 0 shots");
             Assert.AreEqual(0, output.Count, "Output should be empty");
             Assert.AreEqual(initialAmmo, tank.Ammo, "Tank ammo should remain unchanged");
+            Assert.AreEqual(0, session.Grid.GetCell(0, 1), "Cell (0,1) should still be color 0");
         }
 
         /// <summary>
@@ -80,14 +81,14 @@ namespace PixelFlow.Tests
         [Test]
         public void Step_EachTrayTankFiresAtMostOncePerStep()
         {
-            // Arrange
+            // Arrange - 3 exposed columns, 2 tanks of same color
             var palette = new Color32[] { Color.red };
             var tanks = new ColorTankData[]
             {
                 new ColorTankData { colorId = 0, ammo = 5 },
                 new ColorTankData { colorId = 0, ammo = 5 }
             };
-            var level = TestLevels.Create(new[] { "0.0" }, palette, tanks, lanes: 1, slots: 5);
+            var level = TestLevels.Create(new[] { "000" }, palette, tanks, lanes: 1, slots: 5);
             var session = LevelSession.Create(level);
 
             // Add both tanks to tray
@@ -96,6 +97,10 @@ namespace PixelFlow.Tests
             session.Tray.TryAdd(session.Supply.PeekFront(0));
             session.Supply.TryTakeFront(0, out _);
 
+            var tank0 = session.Tray[0];
+            var tank1 = session.Tray[1];
+            var initialAmmo0 = tank0.Ammo;
+            var initialAmmo1 = tank1.Ammo;
             var output = new List<ShotEvent>();
 
             // Act
@@ -104,6 +109,9 @@ namespace PixelFlow.Tests
             // Assert
             Assert.AreEqual(2, shotCount, "Should fire 2 shots (one per tank)");
             Assert.AreEqual(2, output.Count, "Output should contain 2 shot events");
+            Assert.AreNotEqual(output[0].Tank, output[1].Tank, "Shots should come from different tanks");
+            Assert.AreEqual(initialAmmo0 - 1, tank0.Ammo, "Tank 0 ammo should decrease by exactly 1");
+            Assert.AreEqual(initialAmmo1 - 1, tank1.Ammo, "Tank 1 ammo should decrease by exactly 1");
         }
 
         /// <summary>
@@ -191,21 +199,21 @@ namespace PixelFlow.Tests
         [Test]
         public void Step_DoesNotAllocate()
         {
-            // Arrange - Create large grid with random cells
-            var palette = new Color32[10];
-            for (int i = 0; i < 10; i++)
-                palette[i] = new Color32((byte)(i * 25), (byte)(i * 25), (byte)(i * 25), 255);
+            // Arrange - Create 64x64 grid where each column is a single color (x % 5)
+            var palette = new Color32[5];
+            for (int i = 0; i < 5; i++)
+                palette[i] = new Color32((byte)(i * 50), (byte)(i * 50), (byte)(i * 50), 255);
 
             var tanks = new ColorTankData[5];
             for (int i = 0; i < 5; i++)
-                tanks[i] = new ColorTankData { colorId = (byte)(i % 10), ammo = 1000 };
+                tanks[i] = new ColorTankData { colorId = (byte)i, ammo = 10000 };
 
             var rows = new string[64];
             for (int y = 0; y < 64; y++)
             {
                 var row = "";
                 for (int x = 0; x < 64; x++)
-                    row += (char)('0' + ((x + y) % 10));
+                    row += (char)('0' + (x % 5));
                 rows[y] = row;
             }
 
@@ -229,11 +237,13 @@ namespace PixelFlow.Tests
             }
 
             // Act & Assert
+            int shotCount = 0;
             AllocAssert.NoAlloc(() =>
             {
                 output.Clear();
-                session.Shooting.Step(output);
+                shotCount = session.Shooting.Step(output);
             });
+            Assert.AreEqual(5, shotCount, "Should fire 5 shots (one per tank) during measured call");
         }
 
         /// <summary>
@@ -278,6 +288,50 @@ namespace PixelFlow.Tests
 
             // Assert
             Assert.IsFalse(canFire, "Should return false when no tank can fire");
+        }
+
+        /// <summary>
+        /// Test that CanAnyTankFire and GameRules.Evaluate do not allocate memory.
+        /// </summary>
+        [Test]
+        public void CanAnyTankFire_And_Evaluate_DoNotAllocate()
+        {
+            // Arrange - Grid with mixed targets, tray with tanks that can and cannot fire
+            var palette = new Color32[] { Color.red, Color.blue, Color.green };
+            var tanks = new ColorTankData[]
+            {
+                new ColorTankData { colorId = 1, ammo = 5 }, // Can't fire (no color 1 exposed)
+                new ColorTankData { colorId = 0, ammo = 5 }, // Can fire
+                new ColorTankData { colorId = 2, ammo = 5 }  // Can't fire (no color 2 exposed)
+            };
+            var level = TestLevels.Create(new[] { "000" }, palette, tanks, lanes: 1, slots: 5);
+            var session = LevelSession.Create(level);
+
+            // Add all tanks to tray
+            for (int i = 0; i < 3; i++)
+            {
+                session.Tray.TryAdd(session.Supply.PeekFront(0));
+                session.Supply.TryTakeFront(0, out _);
+            }
+
+            // Warm-up
+            for (int i = 0; i < 10; i++)
+            {
+                session.Shooting.CanAnyTankFire();
+                GameRules.Evaluate(session.Grid, session.Tray, session.Supply, session.Shooting);
+            }
+
+            // Act & Assert - CanAnyTankFire
+            AllocAssert.NoAlloc(() =>
+            {
+                session.Shooting.CanAnyTankFire();
+            });
+
+            // Act & Assert - GameRules.Evaluate
+            AllocAssert.NoAlloc(() =>
+            {
+                GameRules.Evaluate(session.Grid, session.Tray, session.Supply, session.Shooting);
+            });
         }
     }
 }
