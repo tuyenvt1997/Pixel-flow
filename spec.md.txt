@@ -1,0 +1,28 @@
+Hãy xây dựng mã nguồn Unity C# cho một tựa game giải đố bắn màu xóa tranh pixel art (giống như thể loại trong hình ảnh mẫu với 1000 - 5000 cube mỗi màn chơi). Dự án cần được thiết kế theo mô hình phân tầng (Clean  Layered Architecture), tối ưu hóa tuyệt đối về hiệu năng (Performance & Low Loading Time) để chạy mượt mà 60 FPS trên thiết bị di động.
+
+Hãy triển khai cụ thể các module sau
+
+1. TẦNG DỮ LIỆU (DATA LAYER)
+- `LevelData` (ScriptableObject) Lưu trữ cấu trúc màn chơi dưới dạng dữ liệu nén sẵn (không xử lý sinh ảnh nặng lúc runtime). Chứa mảng ma trận pixel (Color ID, Tọa độ) và danh sách cấu hình các thùng màu (`ColorTankData` gồm ColorID và số lượng đạn ban đầu).
+- Hỗ trợ định dạng lưu trữ nhẹ (JSON hoặc byte array) để tải level cực nhanh dưới 1 giây.
+
+2. TẦNG LOGIC VÀ MÔ HÌNH (CORE LOGIC & MODEL LAYER)
+- `PixelGridModel` Quản lý dữ liệu toàn bộ pixel trên lưới. Sử dụng cấu trúc từ điển nhanh (Dictionaryint, ListVector2Int) để tra cứu ngay lập tức tọa độ các ô pixel trùng màu với độ phức tạp O(1) thay vì quét toàn bộ mảng hàng nghìn cube.
+- `ColorTankModel` Quản lý số lượng đạn còn lại của thùng màu. Cung cấp sự kiện (C# EventAction) khi số lượng thay đổi hoặc khi cạn sạch đạn.
+- `SlotQueueManager` Quản lý khay chờ cố định phía dưới (tối đa N slot). Xử lý logic tự động dịch chuyển (shift left) các thùng màu phía sau lên khi thùng ở đầu tiên cạn đạn (`count == 0`) và biến mất.
+- `ShootingLogic` Điều phối việc bắn màu. Khi kích hoạt thùng màu, tìm các ô pixel trùng màu, trừ số lượng đạn, đồng thời kích hoạt cơ chế xóa pixel.
+
+3. TẦNG HIỆU NĂNG & XỬ LÝ KHỐI LƯỢNG LỚN (PERFORMANCE & OPTIMIZATION LAYER)
+- Time-slicing  Asynchronous Execution Khi một viên đạn phá hủy hàng trăm ô pixel cùng lúc, chia nhỏ quá trình xóa sang nhiều frame (hoặc dùng Coroutine ngắt quãng) để tránh gây rớt khung hình (drop frame).
+- Object Pooling Xây dựng hệ thống pooling cho các hiệu ứng mảnh vỡ (debris  particles) khi cube vỡ ra, tuyệt đối không dùng lệnh InstantiateDestroy liên tục gây Garbage Collection (GC) Spike.
+- Hỗ trợ GPU Instancing Cấu hình để hiển thị hàng nghìn cube thông qua GPU Instancing và MaterialPropertyBlock nhằm tối ưu hóa Draw Calls xuống mức thấp nhất.
+
+4. TẦNG GIAO DIỆN VÀ HIỆU ỨNG (VIEW LAYER)
+- `PixelCellView` Gắn lên prefab ô pixel. Quản lý việc ẩnhiện ô, hiệu ứng thu nhỏ hoặc phát sinh mảnh vỡ khi bị bắn trúng.
+- `ColorTankView` Gắn lên prefab thùng màu ở khay dưới, hiển thị số lượng đạn (TextMeshPro) cập nhật real-time theo event từ Model.
+- Hỗ trợ hiệu ứng đường bay (ProjectileTween) khi bắn đạn từ khay dưới lên đúng tọa độ thế giới (World Position) của các ô pixel trên tranh.
+
+5. TẦNG ĐIỀU PHỐI (CONTROLLER LAYER)
+- `GameController` Kết nối toàn bộ các tầng trên, lắng nghe tương tác người chơi, quản lý vòng đời màn chơi và kiểm tra điều kiện chiến thắng (toàn bộ pixel trên bảng đã bị xóa sạch = 0).
+
+Hãy viết code C# có cấu trúc sạch, tuân thủ nguyên tắc lập trình hướng đối tượng (OOP), tách rời hoàn toàn Logic và View bằng C# Event, và có chú thích chi tiết bằng tiếng Anh hoặc tiếng Việt trong mã nguồn.
