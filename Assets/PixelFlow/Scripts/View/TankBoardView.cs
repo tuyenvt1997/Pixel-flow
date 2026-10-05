@@ -86,7 +86,14 @@ namespace PixelFlow.View
             Clear();
             _session = session;
 
+            // Size the pool and the depletion list for every tank of the level now, so releasing a depleted
+            // view during play never grows a container.
             SupplyModel supply = session.Supply;
+            int tankCount = supply.TotalRemaining + session.Tray.Count;
+            _pool.Prewarm(tankCount);
+            if (_depleting.Capacity < tankCount)
+                _depleting.Capacity = tankCount;
+
             for (int lane = 0; lane < supply.LaneCount; lane++)
             {
                 IReadOnlyList<ColorTankModel> tanks = supply.GetLane(lane);

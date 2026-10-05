@@ -54,6 +54,23 @@ namespace PixelFlow.Performance
         }
 
         /// <summary>
+        /// Creates inactive instances until <see cref="CountAll"/> is at least <paramref name="count"/>. Call it when
+        /// building a level: once the pool owns every instance the level needs, its internal containers are
+        /// already large enough, so later <see cref="Get"/>/<see cref="Release"/> calls never allocate.
+        /// </summary>
+        /// <param name="count">Total number of instances the pool should own.</param>
+        public void Prewarm(int count)
+        {
+            while (_countAll < count)
+            {
+                T item = _create();
+                _inactive.Push(item);
+                _inactiveSet.Add(item);
+                _countAll++;
+            }
+        }
+
+        /// <summary>
         /// Gets an object from the pool. Creates a new one if the pool is empty.
         /// </summary>
         /// <returns>An object from the pool or a newly created one.</returns>

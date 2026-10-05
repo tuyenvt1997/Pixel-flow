@@ -26,6 +26,15 @@ namespace PixelFlow.Performance
         }
 
         /// <summary>
+        /// Creates a new time-sliced queue that can hold <paramref name="capacity"/> items before it has to grow.
+        /// </summary>
+        /// <param name="capacity">Initial capacity (pre-sizing avoids GC allocations in Enqueue during play).</param>
+        public TimeSlicedQueue(int capacity)
+        {
+            _items = new Queue<T>(capacity);
+        }
+
+        /// <summary>
         /// Adds an item to the end of the queue.
         /// </summary>
         /// <param name="item">The item to enqueue.</param>

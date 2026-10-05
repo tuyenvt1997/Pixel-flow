@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using PixelFlow.Core;
 using TMPro;
 using UnityEngine;
@@ -20,6 +21,7 @@ namespace PixelFlow.View
 
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
         private static MaterialPropertyBlock s_props;
+        private static string[] s_ammoLabels = new string[0];
 
         [Tooltip("Renderer of the tank body; tinted with the tank colour.")]
         [SerializeField] private MeshRenderer body;
@@ -124,6 +126,7 @@ namespace PixelFlow.View
             if (pickCollider != null)
                 pickCollider.enabled = true;
 
+            EnsureAmmoLabels(model.Ammo);
             SetAmmoText(model.Ammo);
         }
 
@@ -238,8 +241,30 @@ namespace PixelFlow.View
 
         private void SetAmmoText(int ammo)
         {
-            if (ammoText != null)
+            if (ammoText == null)
+                return;
+
+            // Cached labels: TMP_Text.SetText(string, float) rebuilds m_text (a new string) every call in the Editor.
+            if (ammo >= 0 && ammo < s_ammoLabels.Length)
+                ammoText.text = s_ammoLabels[ammo];
+            else
                 ammoText.SetText("{0}", ammo);
+        }
+
+        /// <summary>
+        /// Grows the shared label cache to cover 0..<paramref name="maxAmmo"/>. Called from <see cref="Bind"/>
+        /// (level build), never while shooting: ammo only decreases after binding.
+        /// </summary>
+        private static void EnsureAmmoLabels(int maxAmmo)
+        {
+            if (maxAmmo < s_ammoLabels.Length)
+                return;
+
+            var labels = new string[maxAmmo + 1];
+            Array.Copy(s_ammoLabels, labels, s_ammoLabels.Length);
+            for (int i = s_ammoLabels.Length; i < labels.Length; i++)
+                labels[i] = i.ToString(CultureInfo.InvariantCulture);
+            s_ammoLabels = labels;
         }
     }
 }

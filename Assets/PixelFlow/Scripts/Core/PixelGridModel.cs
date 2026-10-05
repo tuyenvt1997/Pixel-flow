@@ -119,6 +119,13 @@ namespace PixelFlow.Core
                 }
             }
 
+            // Pre-size one exposed-column list per present color: a color is exposed in at most `width` columns,
+            // so RemoveCell never grows or creates a list (zero GC allocation while shooting).
+            foreach (var pair in _cellsByColor)
+            {
+                _exposedColumnsByColor[pair.Key] = new List<int>(width);
+            }
+
             // Build front row (exposed cells per column)
             for (int x = 0; x < width; x++)
             {

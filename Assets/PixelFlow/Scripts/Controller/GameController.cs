@@ -26,6 +26,7 @@ namespace PixelFlow.Controller
         public const int MaxFireStepsPerFrame = 8;
 
         private const int CellPoolPrewarm = 128;
+        private const int DestroyQueueCapacity = 256;
         private const float RaycastDistance = 100f;
 
         /// <summary>
@@ -140,7 +141,7 @@ namespace PixelFlow.Controller
                 v => v.gameObject.SetActive(true),
                 v => v.gameObject.SetActive(false),
                 CellPoolPrewarm);
-            _destroyQueue = new TimeSlicedQueue<PendingDestroy>();
+            _destroyQueue = new TimeSlicedQueue<PendingDestroy>(DestroyQueueCapacity);
             _shots = new List<ShotEvent>(16);
 
             projectiles.OnArrived += _onArrived;
