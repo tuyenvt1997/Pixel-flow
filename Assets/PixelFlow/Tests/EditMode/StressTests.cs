@@ -87,27 +87,43 @@ namespace PixelFlow.Tests
         /// After the first 10 steps, the full auto-play loop (rules evaluation, tray activation, shooting step)
         /// allocates no GC memory until the level is won.
         /// </summary>
+        /// <remarks>
+        /// <see cref="AllocAssert.NoAlloc"/> runs the action once unmeasured before the measured call. That first
+        /// run plays a separate warm-up session to the end and then switches the action to the measured session, so
+        /// the measured call still plays a full level (assigning a reference does not allocate).
+        /// </remarks>
         [Test]
         public void Stress_FullAutoPlay_NoAllocationInSteadyState()
         {
-            LevelSession s = LevelSession.Create(_level);
-            var shots = new List<ShotEvent>(s.Tray.Capacity);
+            LevelSession warm = LevelSession.Create(_level);
+            LevelSession measured = LevelSession.Create(_level);
+            var shots = new List<ShotEvent>(measured.Tray.Capacity);
 
             for (int i = 0; i < WarmupSteps; i++)
-                PlayIteration(s, shots);
+            {
+                PlayIteration(warm, shots);
+                PlayIteration(measured, shots);
+            }
 
+            LevelSession current = warm;
             GameState state = GameState.Playing;
+            int measuredRuns = 0;
             AllocAssert.NoAlloc(() =>
             {
                 for (int i = 0; i < MaxIterations; i++)
                 {
-                    state = PlayIteration(s, shots);
+                    state = PlayIteration(current, shots);
                     if (state != GameState.Playing)
                         break;
                 }
+                if (current == measured)
+                    measuredRuns++;
+                current = measured;
             });
 
+            Assert.AreEqual(1, measuredRuns, "The measured session was not played exactly once.");
             Assert.AreEqual(GameState.Won, state);
+            Assert.AreEqual(0, measured.Grid.RemainingCount);
         }
 
         /// <summary>

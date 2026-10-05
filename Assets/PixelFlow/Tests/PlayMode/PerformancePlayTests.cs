@@ -27,7 +27,13 @@ namespace PixelFlow.Tests
         private const int WarmupFrames = 60;
         private const int MaxWarmupFrames = 600;
         private const int DepletionSettleFrames = 30;
-        private const int SampleFrames = 300;
+        // Below the profiler's 300-frame history, so the sampled frames plus the flush frames all stay in the buffer.
+        private const int SampleFrames = 240;
+        private const int FlushFrames = 5;
+        private const string FeedTrayMarkerName = "PixelFlow.Test.FeedTray";
+
+        // Marks the tap-to-activate gameplay path driven from the test coroutine, so the GC check counts it as game code.
+        private static readonly ProfilerMarker s_feedTrayMarker = new ProfilerMarker(FeedTrayMarkerName);
         private const double FrameBudgetMs = 1000.0 / 60.0;
 
         private ProfilerRecorder _gcAlloc;
@@ -68,7 +74,7 @@ namespace PixelFlow.Tests
 
         /// <summary>
         /// Plays Level_001 with the tray kept busy, warms up (at least 60 frames and one complete
-        /// tank depletion), then samples 300 frames while shooting, with game time fixed at 1/60 s per frame:
+        /// tank depletion), then samples 240 frames while shooting, with game time fixed at 1/60 s per frame:
         /// <list type="bullet">
         /// <item>GC allocation: the profiler hierarchy (main thread, "PlayerLoop" subtree, i.e. the Hierarchy view's
         /// GC Alloc column) must show 0 B in every sampled frame outside the test harness (test runner coroutine,
@@ -105,6 +111,7 @@ namespace PixelFlow.Tests
             _mainThread = ProfilerRecorder.StartNew(ProfilerCategory.Internal, "Main Thread", 15);
             _batches = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Batches Count");
             _drawCalls = ProfilerRecorder.StartNew(ProfilerCategory.Render, "Draw Calls Count");
+            Assert.IsTrue(_mainThread.Valid, "Main Thread counter unavailable.");
 
 #if UNITY_EDITOR
             ProfilerDriver.ClearAllFrames();
@@ -182,7 +189,7 @@ namespace PixelFlow.Tests
 #if UNITY_EDITOR
             // Let the profiler flush the last sampled frames, then stop recording.
             int lastProfiledFrame = ProfilerDriver.lastFrameIndex;
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < FlushFrames; i++)
                 yield return null;
             ProfilerDriver.enabled = false;
             gameAllocFrames = AnalyzeHierarchy(firstProfiledFrame, lastProfiledFrame, report);
@@ -192,7 +199,6 @@ namespace PixelFlow.Tests
             Assert.GreaterOrEqual(samples, SampleFrames * 9 / 10, "Shooting was not active for most sampled frames.");
             Assert.Greater(shotPixels, 0, "No pixel was shot during sampling.");
             Assert.AreEqual(0, gameAllocFrames, "Game code allocated GC memory in shooting frames; see the log.");
-            Assert.IsTrue(_mainThread.Valid, "Main Thread counter unavailable.");
             Assert.Less(avgMainMs, FrameBudgetMs, "Average main thread time over the 60 FPS budget.");
             Assert.LessOrEqual(grid.BatchCount, 5, "Board needs more than 5 instanced batches.");
         }
@@ -207,6 +213,7 @@ namespace PixelFlow.Tests
         private static int AnalyzeHierarchy(int firstFrame, int lastFrame, StringBuilder report)
         {
             int frames = 0;
+            int feedTrayFrames = 0;
             int gameAllocFrames = 0;
             double totalPlayerLoopMs = 0;
             double maxPlayerLoopMs = 0;
@@ -232,6 +239,8 @@ namespace PixelFlow.Tests
                     if (loopMs > maxPlayerLoopMs)
                         maxPlayerLoopMs = loopMs;
 
+                    if (ContainsMarker(view, playerLoop, FeedTrayMarkerName))
+                        feedTrayFrames++;
                     double gameBytes = CollectAllocs(view, playerLoop, "PlayerLoop", f - firstFrame, allocByPath);
                     if (gameBytes > 0)
                         gameAllocFrames++;
@@ -240,7 +249,7 @@ namespace PixelFlow.Tests
 
             report.Append($" Profiler hierarchy: {frames} frames (#{firstFrame}-#{lastFrame}); PlayerLoop avg ")
                 .Append($"{(frames > 0 ? totalPlayerLoopMs / frames : 0):F3} ms, max {maxPlayerLoopMs:F3} ms; ")
-                .Append($"game GC alloc in {gameAllocFrames} frames.");
+                .Append($"game GC alloc in {gameAllocFrames} frames; FeedTray marker in {feedTrayFrames} frames.");
             foreach (KeyValuePair<string, AllocSite> pair in allocByPath)
                 report.Append($"\n  GC alloc {pair.Value.Bytes:F0} B in {pair.Value.Frames} frames ")
                     .Append($"(sample #{pair.Value.First}-#{pair.Value.Last}) at {pair.Key}");
@@ -248,7 +257,10 @@ namespace PixelFlow.Tests
             foreach (string stack in s_callstacks)
                 report.Append("\n  Game allocation callstack:").Append(stack);
 
-            Assert.Greater(frames, 0, "No profiler frames captured.");
+            int expectedFrames = lastFrame - firstFrame + 1;
+            Assert.GreaterOrEqual(expectedFrames, SampleFrames, "Profiled range shorter than the sampled frames.");
+            Assert.AreEqual(expectedFrames, frames, "Some sampled frames were missing from the profiler history.");
+            Assert.Greater(feedTrayFrames, 0, "FeedTray marker not found in the profiler hierarchy.");
             return gameAllocFrames;
         }
 
@@ -337,11 +349,29 @@ namespace PixelFlow.Tests
         /// <summary>
         /// True for PlayerLoop markers that run no game code: the test runner coroutine (this test's enumerator)
         /// and UnitySynchronizationContext tasks (async continuations of editor packages; the game has no async code).
+        /// Anything inside the <see cref="FeedTrayMarkerName"/> marker is the game's tap-to-activate path and always
+        /// counts as game code, even though it runs inside the test coroutine.
         /// </summary>
         private static bool IsTestHarness(string path)
         {
+            if (path.Contains(FeedTrayMarkerName))
+                return false;
             return path.Contains("PlaymodeTestsController") || path.Contains("PerformancePlayTests") ||
                    path.Contains("UnitySynchronizationContext");
+        }
+
+        private static bool ContainsMarker(HierarchyFrameDataView view, int id, string name)
+        {
+            if (view.GetItemName(id) == name)
+                return true;
+            var children = new List<int>();
+            view.GetItemChildren(id, children);
+            foreach (int child in children)
+            {
+                if (ContainsMarker(view, child, name))
+                    return true;
+            }
+            return false;
         }
 
         private static int FindChild(HierarchyFrameDataView view, int parent, string name, List<int> buffer)
@@ -356,16 +386,23 @@ namespace PixelFlow.Tests
         }
 #endif
 
-        /// <summary>
-        /// Keeps the tray busy: moves the lowest-id lane-front tank whose colour is exposed into the tray, or any
-        /// lane-front tank when nothing in the tray can fire.
-        /// </summary>
         private static int TanksLeft(LevelSession s)
         {
             return s.Supply.TotalRemaining + s.Tray.Count;
         }
 
+        /// <summary>
+        /// Keeps the tray busy: moves the lowest-id lane-front tank whose colour is exposed into the tray, or any
+        /// lane-front tank when nothing in the tray can fire. Runs inside the <see cref="FeedTrayMarkerName"/>
+        /// profiler marker so its allocations count as game code.
+        /// </summary>
         private static void FeedTray(GameController controller)
+        {
+            using (s_feedTrayMarker.Auto())
+                FeedTrayCore(controller);
+        }
+
+        private static void FeedTrayCore(GameController controller)
         {
             LevelSession s = controller.Session;
             if (s.Tray.IsFull)
