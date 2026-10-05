@@ -1,0 +1,27 @@
+{
+    "name": "PixelFlow.Tests.PlayMode",
+    "rootNamespace": "PixelFlow.Tests",
+    "references": [
+        "PixelFlow.Data",
+        "PixelFlow.Core",
+        "PixelFlow.Performance",
+        "PixelFlow.View",
+        "PixelFlow.Controller",
+        "UnityEngine.UI",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

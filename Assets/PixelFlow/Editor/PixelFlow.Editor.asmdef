@@ -7,7 +7,9 @@
         "PixelFlow.Performance",
         "PixelFlow.View",
         "PixelFlow.Controller",
-        "Unity.TextMeshPro"
+        "Unity.TextMeshPro",
+        "Unity.InputSystem",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [
         "Editor"
