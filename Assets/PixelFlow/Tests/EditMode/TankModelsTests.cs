@@ -202,6 +202,48 @@ namespace PixelFlow.Tests
             Assert.That(removedEvents[0].oldIndex, Is.EqualTo(1));
         }
 
+        [Test]
+        public void TryAdd_Null_Throws()
+        {
+            var manager = new SlotQueueManager(3);
+            Assert.Throws<ArgumentNullException>(() => manager.TryAdd(null));
+            Assert.That(manager.Count, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void TryAdd_DepletedTank_Throws()
+        {
+            var manager = new SlotQueueManager(3);
+            var events = new List<(ColorTankModel tank, int slot)>();
+            manager.OnTankAdded += (t, s) => events.Add((t, s));
+
+            var tank = new ColorTankModel(1, 10, 1);
+            tank.TryConsume(); // Deplete it
+            Assert.That(tank.IsDepleted, Is.True);
+
+            Assert.Throws<InvalidOperationException>(() => manager.TryAdd(tank));
+            Assert.That(manager.Count, Is.EqualTo(0));
+            Assert.That(events.Count, Is.EqualTo(0)); // No event raised
+        }
+
+        [Test]
+        public void TryAdd_SameTankTwice_Throws()
+        {
+            var manager = new SlotQueueManager(3);
+            var events = new List<(ColorTankModel tank, int slot)>();
+            manager.OnTankAdded += (t, s) => events.Add((t, s));
+
+            var tank = new ColorTankModel(1, 10, 20);
+            Assert.That(manager.TryAdd(tank), Is.True);
+            Assert.That(manager.Count, Is.EqualTo(1));
+            Assert.That(events.Count, Is.EqualTo(1));
+
+            // Try to add same tank again
+            Assert.Throws<InvalidOperationException>(() => manager.TryAdd(tank));
+            Assert.That(manager.Count, Is.EqualTo(1)); // Unchanged
+            Assert.That(events.Count, Is.EqualTo(1)); // No new event
+        }
+
         #endregion
 
         #region SupplyModel Tests

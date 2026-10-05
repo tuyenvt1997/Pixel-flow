@@ -72,8 +72,25 @@ namespace PixelFlow.Core
         /// </summary>
         /// <param name="tank">The tank to add.</param>
         /// <returns>True if the tank was added; false if the queue is full.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when tank is null.</exception>
+        /// <exception cref="InvalidOperationException">Thrown when tank is already depleted or already in the queue.</exception>
         public bool TryAdd(ColorTankModel tank)
         {
+            if (tank == null)
+            {
+                throw new ArgumentNullException(nameof(tank));
+            }
+
+            if (tank.IsDepleted)
+            {
+                throw new InvalidOperationException("Cannot add a depleted tank to the queue.");
+            }
+
+            if (_tanks.Contains(tank))
+            {
+                throw new InvalidOperationException("Cannot add the same tank to the queue twice.");
+            }
+
             if (IsFull)
             {
                 return false;
