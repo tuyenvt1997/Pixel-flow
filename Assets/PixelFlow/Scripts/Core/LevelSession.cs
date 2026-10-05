@@ -1,0 +1,103 @@
+using PixelFlow.Data;
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace PixelFlow.Core
+{
+    /// <summary>
+    /// Encapsulates all runtime state for a single level session.
+    /// </summary>
+    public sealed class LevelSession
+    {
+        /// <summary>
+        /// The pixel grid model for this level.
+        /// </summary>
+        public PixelGridModel Grid { get; private set; }
+
+        /// <summary>
+        /// The slot queue manager (player's tray).
+        /// </summary>
+        public SlotQueueManager Tray { get; private set; }
+
+        /// <summary>
+        /// The supply model (available tanks).
+        /// </summary>
+        public SupplyModel Supply { get; private set; }
+
+        /// <summary>
+        /// The shooting logic for this level.
+        /// </summary>
+        public ShootingLogic Shooting { get; private set; }
+
+        /// <summary>
+        /// The color palette for this level.
+        /// </summary>
+        public Color32[] Palette { get; private set; }
+
+        /// <summary>
+        /// Width of the grid in cells.
+        /// </summary>
+        public int Width { get; private set; }
+
+        /// <summary>
+        /// Height of the grid in cells.
+        /// </summary>
+        public int Height { get; private set; }
+
+        /// <summary>
+        /// Creates a new level session from level data.
+        /// </summary>
+        /// <param name="data">The level data to create the session from.</param>
+        /// <returns>A configured level session.</returns>
+        /// <exception cref="ArgumentException">
+        /// Thrown when tank.colorId >= palette.Length, laneCount &lt; 1, or slotCount &lt; 1.
+        /// </exception>
+        public static LevelSession Create(LevelData data)
+        {
+            // Validate parameters
+            if (data.laneCount < 1)
+            {
+                throw new ArgumentException("laneCount must be at least 1", nameof(data));
+            }
+
+            if (data.slotCount < 1)
+            {
+                throw new ArgumentException("slotCount must be at least 1", nameof(data));
+            }
+
+            // Validate tank colors
+            for (int i = 0; i < data.tanks.Length; i++)
+            {
+                if (data.tanks[i].colorId >= data.palette.Length)
+                {
+                    throw new ArgumentException(
+                        $"Tank {i} has colorId {data.tanks[i].colorId} which is outside palette range (0-{data.palette.Length - 1})",
+                        nameof(data));
+                }
+            }
+
+            // Create tank models (ID = index in data.tanks)
+            var tankModels = new List<ColorTankModel>(data.tanks.Length);
+            for (int i = 0; i < data.tanks.Length; i++)
+            {
+                var tankData = data.tanks[i];
+                tankModels.Add(new ColorTankModel(i, tankData.colorId, tankData.ammo));
+            }
+
+            // Create session
+            var session = new LevelSession();
+            session.Width = data.width;
+            session.Height = data.height;
+            session.Palette = data.palette;
+
+            // Create models
+            session.Grid = new PixelGridModel(data.width, data.height, data.cells);
+            session.Tray = new SlotQueueManager(data.slotCount);
+            session.Supply = new SupplyModel(tankModels, data.laneCount);
+            session.Shooting = new ShootingLogic(session.Grid, session.Tray);
+
+            return session;
+        }
+    }
+}
