@@ -24,7 +24,10 @@ namespace PixelFlow.EditorTools
         /// </summary>
         public const string CapturePath = "Logs/board_capture.png";
 
-        private const string ShaderName = "PixelFlow/InstancedColor";
+        /// <summary>
+        /// Name of the instanced board shader (also used by the pooled destroy-animation cube).
+        /// </summary>
+        public const string ShaderName = "PixelFlow/InstancedColor";
 
         /// <summary>
         /// Creates (or updates) <see cref="MaterialPath"/> using the PixelFlow/InstancedColor shader

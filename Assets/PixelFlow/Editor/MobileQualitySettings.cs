@@ -7,7 +7,7 @@ namespace PixelFlow.EditorTools
     /// <summary>
     /// Applies the mobile performance settings for the 60 FPS target: no shadows and no MSAA on the quality level
     /// Android and iOS use by default, main light shadows off in the URP asset, and default (automatic) graphics
-    /// APIs on Android/iOS (Vulkan/GLES3, Metal) so GPU instancing stays available.
+    /// APIs on Android/iOS (Vulkan/GLES3, Metal) so GPU instancing stays available, and a portrait-locked screen.
     /// </summary>
     public static class MobileQualitySettings
     {
@@ -24,6 +24,7 @@ namespace PixelFlow.EditorTools
             ApplyUrpAsset();
             KeepDefaultGraphicsApis(BuildTarget.Android);
             KeepDefaultGraphicsApis(BuildTarget.iOS);
+            LockPortrait();
             AssetDatabase.SaveAssets();
         }
 
@@ -74,6 +75,21 @@ namespace PixelFlow.EditorTools
             so.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(rp);
             Debug.Log($"[PixelFlow] URP asset '{AssetDatabase.GetAssetPath(rp)}': main light shadows off, MSAA 1x (off).");
+        }
+
+        /// <summary>
+        /// Locks the game to portrait: the board, tray and supply layout and the 1080x1920 HUD are portrait-only.
+        /// The autorotation flags are narrowed to portrait as well, in case AutoRotation is selected later.
+        /// </summary>
+        private static void LockPortrait()
+        {
+            PlayerSettings.defaultInterfaceOrientation = UIOrientation.Portrait;
+            PlayerSettings.allowedAutorotateToPortrait = true;
+            PlayerSettings.allowedAutorotateToPortraitUpsideDown = true;
+            PlayerSettings.allowedAutorotateToLandscapeLeft = false;
+            PlayerSettings.allowedAutorotateToLandscapeRight = false;
+            Debug.Log($"[PixelFlow] Default orientation = {PlayerSettings.defaultInterfaceOrientation}; " +
+                      "autorotation limited to Portrait/PortraitUpsideDown.");
         }
 
         private static void KeepDefaultGraphicsApis(BuildTarget target)

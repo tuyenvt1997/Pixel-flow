@@ -119,9 +119,13 @@ namespace PixelFlow.EditorTools
             }
             else
             {
-                if (AssetDatabase.LoadMainAssetAtPath(path) != null)
+                Object occupant = AssetDatabase.LoadMainAssetAtPath(path);
+                if (occupant != null)
                 {
-                    AssetDatabase.DeleteAsset(path); // a non-LevelData asset occupies the path
+                    // A non-LevelData asset occupies the path; it is replaced, so say so before deleting it.
+                    Debug.LogWarning($"[PixelFlow] Deleting {occupant.GetType().Name} '{occupant.name}' at {path} " +
+                                     "to save a LevelData there.");
+                    AssetDatabase.DeleteAsset(path);
                 }
                 AssetDatabase.CreateAsset(level, path);
                 saved = level;

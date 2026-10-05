@@ -92,10 +92,14 @@ namespace PixelFlow.EditorTools
 
             Material viewMaterial = CreateOrUpdateMaterial(MaterialFolder + "/ViewUnlit.mat", "Universal Render Pipeline/Unlit");
             Material particleMaterial = CreateOrUpdateMaterial(MaterialFolder + "/DebrisParticle.mat", "Universal Render Pipeline/Particles/Unlit");
-            if (viewMaterial == null || particleMaterial == null)
+            // The destroy-animation cube uses the board's shader so a cell keeps its exact shading (no brightness
+            // pop) when the instanced cell is hidden and the pooled cube takes over. Both colour paths are linear:
+            // the board writes Color.linear via SetVectorArray, PixelCellView uses SetColor (gamma -> linear).
+            Material cellMaterial = CreateOrUpdateMaterial(MaterialFolder + "/CellInstanced.mat", BoardRenderTools.ShaderName);
+            if (viewMaterial == null || particleMaterial == null || cellMaterial == null)
                 return;
 
-            PixelCellView cellPrefab = BuildCellPrefab(viewMaterial);
+            PixelCellView cellPrefab = BuildCellPrefab(cellMaterial);
             ColorTankView tankPrefab = BuildTankPrefab(viewMaterial, font);
             Transform projectilePrefab = BuildProjectilePrefab(viewMaterial);
             DebrisFx debrisPrefab = BuildDebrisPrefab(particleMaterial);
