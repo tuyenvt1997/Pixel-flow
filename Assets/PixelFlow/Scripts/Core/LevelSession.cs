@@ -50,11 +50,34 @@ namespace PixelFlow.Core
         /// </summary>
         /// <param name="data">The level data to create the session from.</param>
         /// <returns>A configured level session.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when data is null.</exception>
         /// <exception cref="ArgumentException">
-        /// Thrown when tank.colorId >= palette.Length, laneCount &lt; 1, or slotCount &lt; 1.
+        /// Thrown when palette, tanks or cells is null, tank.colorId >= palette.Length, a non-empty cell value
+        /// >= palette.Length, cells.Length != width * height, a tank has no ammo, laneCount &lt; 1, or
+        /// slotCount &lt; 1. Create has no side effects, so a throw leaves any existing session untouched.
         /// </exception>
         public static LevelSession Create(LevelData data)
         {
+            if (data == null)
+            {
+                throw new ArgumentNullException(nameof(data));
+            }
+
+            if (data.palette == null)
+            {
+                throw new ArgumentException("palette must not be null", nameof(data));
+            }
+
+            if (data.tanks == null)
+            {
+                throw new ArgumentException("tanks must not be null", nameof(data));
+            }
+
+            if (data.cells == null)
+            {
+                throw new ArgumentException("cells must not be null", nameof(data));
+            }
+
             // Validate parameters
             if (data.laneCount < 1)
             {
@@ -73,6 +96,20 @@ namespace PixelFlow.Core
                 {
                     throw new ArgumentException(
                         $"Tank {i} has colorId {data.tanks[i].colorId} which is outside palette range (0-{data.palette.Length - 1})",
+                        nameof(data));
+                }
+            }
+
+            // Validate cell colors
+            byte[] cells = data.cells;
+            int paletteLength = data.palette.Length;
+            for (int i = 0; i < cells.Length; i++)
+            {
+                byte cell = cells[i];
+                if (cell != LevelData.EmptyCell && cell >= paletteLength)
+                {
+                    throw new ArgumentException(
+                        $"Cell {i} has colorId {cell} which is outside palette range (0-{paletteLength - 1})",
                         nameof(data));
                 }
             }

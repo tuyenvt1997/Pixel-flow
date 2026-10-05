@@ -202,5 +202,50 @@ namespace PixelFlow.Tests
             // Act & Assert
             Assert.Throws<System.ArgumentException>(() => LevelSession.Create(level), "Should throw when tank color is outside palette");
         }
+
+        /// <summary>
+        /// Test that LevelSession.Create rejects null data and null palette/tanks/cells arrays.
+        /// </summary>
+        [Test]
+        public void Create_NullArrays_Throws()
+        {
+            Assert.Throws<System.ArgumentNullException>(() => LevelSession.Create(null), "null data");
+
+            var palette = new Color32[] { Color.red };
+            var tanks = new ColorTankData[] { new ColorTankData { colorId = 0, ammo = 1 } };
+
+            var noPalette = TestLevels.Create(new[] { "0" }, palette, tanks);
+            noPalette.palette = null;
+            Assert.Throws<System.ArgumentException>(() => LevelSession.Create(noPalette), "null palette");
+
+            var noTanks = TestLevels.Create(new[] { "0" }, palette, tanks);
+            noTanks.tanks = null;
+            Assert.Throws<System.ArgumentException>(() => LevelSession.Create(noTanks), "null tanks");
+
+            var noCells = TestLevels.Create(new[] { "0" }, palette, tanks);
+            noCells.cells = null;
+            Assert.Throws<System.ArgumentException>(() => LevelSession.Create(noCells), "null cells");
+
+            Object.DestroyImmediate(noPalette);
+            Object.DestroyImmediate(noTanks);
+            Object.DestroyImmediate(noCells);
+        }
+
+        /// <summary>
+        /// Test that LevelSession.Create throws when a non-empty cell references a colour outside the palette,
+        /// while EmptyCell (255) stays valid.
+        /// </summary>
+        [Test]
+        public void Create_CellColorOutsidePalette_Throws()
+        {
+            var palette = new Color32[] { Color.red, Color.blue };
+            var tanks = new ColorTankData[] { new ColorTankData { colorId = 0, ammo = 1 } };
+            var level = TestLevels.Create(new[] { "0.", "12" }, palette, tanks);
+
+            var ex = Assert.Throws<System.ArgumentException>(() => LevelSession.Create(level));
+            StringAssert.Contains("colorId 2", ex.Message);
+
+            Object.DestroyImmediate(level);
+        }
     }
 }

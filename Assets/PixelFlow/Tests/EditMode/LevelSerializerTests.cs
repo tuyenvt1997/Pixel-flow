@@ -267,5 +267,41 @@ namespace PixelFlow.Tests
             // Act & Assert
             Assert.Throws<ArgumentException>(() => LevelSerializer.ToBytes(level));
         }
+
+        [Test]
+        public void FromJson_Malformed_Throws()
+        {
+            // Arrange: a valid JSON to derive the broken variants from
+            var palette = new Color32[] { new Color32(255, 0, 0, 255) };
+            var tanks = new ColorTankData[] { new ColorTankData { colorId = 0, ammo = 1 } };
+            var level = TestLevels.Create(new[] { "0" }, palette, tanks);
+            string valid = LevelSerializer.ToJson(level);
+            string paletteEntry = "\"#FF0000FF\"";
+            StringAssert.Contains(paletteEntry, valid);
+
+            string[] malformed =
+            {
+                null,                                              // no input -> null DTO
+                "",                                                // no input -> null DTO
+                "{ not json",                                      // JsonUtility parse error (ArgumentException)
+                valid.Replace(paletteEntry, "\"#ZZ0000FF\""),      // bad hex digit (FormatException)
+                valid.Replace(paletteEntry, "\"#F\""),             // short hex (ArgumentOutOfRangeException)
+                valid.Replace("\"cellsRle\":\"", "\"cellsRle\":\"!!"), // bad Base64 (FormatException)
+            };
+
+            for (int i = 0; i < malformed.Length; i++)
+            {
+                var target = ScriptableObject.CreateInstance<LevelData>();
+                var untouched = new Color32[0];
+                target.palette = untouched;
+                Assert.Throws<InvalidDataException>(() => LevelSerializer.FromJson(malformed[i], target),
+                    $"Variant {i} did not throw InvalidDataException");
+                Assert.AreSame(untouched, target.palette, $"Variant {i} partially populated the target");
+                Assert.AreEqual(0, target.width, $"Variant {i} partially populated the target");
+                UnityEngine.Object.DestroyImmediate(target);
+            }
+
+            UnityEngine.Object.DestroyImmediate(level);
+        }
     }
 }

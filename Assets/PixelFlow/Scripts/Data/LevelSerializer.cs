@@ -251,15 +251,43 @@ namespace PixelFlow.Data
         /// Deserializes JSON data into a LevelData instance.
         /// </summary>
         /// <param name="json">JSON string to deserialize.</param>
-        /// <param name="target">Target LevelData instance to populate.</param>
+        /// <param name="target">Target LevelData instance to populate. Left unchanged if parsing fails.</param>
+        /// <exception cref="InvalidDataException">
+        /// Thrown when the JSON is malformed, empty, or holds invalid palette / cell data.
+        /// </exception>
         public static void FromJson(string json, LevelData target)
         {
-            var dto = JsonUtility.FromJson<LevelDataDTO>(json);
+            LevelDataDTO dto;
+            Color32[] palette;
+            byte[] cells;
+            try
+            {
+                dto = string.IsNullOrEmpty(json) ? null : JsonUtility.FromJson<LevelDataDTO>(json);
+                if (dto == null)
+                    throw new InvalidDataException("JSON does not contain a level");
+                if (dto.palette == null || dto.cellsRle == null || dto.tanks == null)
+                    throw new InvalidDataException("JSON level is missing palette, cellsRle or tanks");
+                if (dto.width < 0 || dto.height < 0)
+                    throw new InvalidDataException($"Invalid grid size {dto.width}x{dto.height}");
+
+                palette = StringsToPalette(dto.palette);
+                cells = Base64RLEToCells(dto.cellsRle, dto.width * dto.height);
+            }
+            catch (InvalidDataException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is FormatException || ex is ArgumentException || ex is EndOfStreamException)
+            {
+                // ArgumentException covers JsonUtility parse errors and the ArgumentOutOfRangeException of a
+                // too-short hex colour; FormatException covers bad hex digits / Base64.
+                throw new InvalidDataException("Failed to deserialize level JSON", ex);
+            }
 
             target.width = dto.width;
             target.height = dto.height;
-            target.palette = StringsToPalette(dto.palette);
-            target.cells = Base64RLEToCells(dto.cellsRle, dto.width * dto.height);
+            target.palette = palette;
+            target.cells = cells;
             target.tanks = dto.tanks;
             target.laneCount = dto.laneCount;
             target.slotCount = dto.slotCount;
@@ -281,6 +309,8 @@ namespace PixelFlow.Data
             var result = new Color32[paletteStrings.Length];
             for (int i = 0; i < paletteStrings.Length; i++)
             {
+                if (paletteStrings[i] == null)
+                    throw new InvalidDataException($"Palette entry {i} is null");
                 string hex = paletteStrings[i].TrimStart('#');
                 byte r = Convert.ToByte(hex.Substring(0, 2), 16);
                 byte g = Convert.ToByte(hex.Substring(2, 2), 16);
