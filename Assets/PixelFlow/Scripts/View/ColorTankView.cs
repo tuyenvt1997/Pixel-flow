@@ -149,6 +149,19 @@ namespace PixelFlow.View
         }
 
         /// <summary>
+        /// <see cref="MuzzlePosition"/> as it will be once the running move tween (if any) has finished, i.e. the
+        /// muzzle at the view's destination. Equals <see cref="MuzzlePosition"/> when the view is not moving.
+        /// </summary>
+        public Vector3 TargetMuzzlePosition
+        {
+            get
+            {
+                Vector3 muzzlePos = MuzzlePosition;
+                return _moving ? muzzlePos + (_moveTo - transform.position) : muzzlePos;
+            }
+        }
+
+        /// <summary>
         /// Places the view at <paramref name="position"/> immediately, cancelling any move tween.
         /// </summary>
         /// <param name="position">World-space target.</param>

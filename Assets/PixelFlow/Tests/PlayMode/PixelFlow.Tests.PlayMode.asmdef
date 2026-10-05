@@ -8,6 +8,7 @@
         "PixelFlow.View",
         "PixelFlow.Controller",
         "UnityEngine.UI",
+        "Unity.InputSystem",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

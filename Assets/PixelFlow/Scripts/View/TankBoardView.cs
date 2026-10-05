@@ -163,9 +163,11 @@ namespace PixelFlow.View
         }
 
         /// <summary>
-        /// World-space muzzle of the view presenting <paramref name="tank"/>. Also resolves a tank that has just
-        /// been removed from the tray and is still playing its depletion animation. Returns the tray root
-        /// position (or this transform's position) if the tank has no view.
+        /// World-space muzzle of the view presenting <paramref name="tank"/>, taken at the view's tween destination
+        /// (<see cref="ColorTankView.TargetMuzzlePosition"/>): a tank that has just entered the tray fires from its
+        /// slot, not from the lane it is still flying away from. Also resolves a tank that has just been removed
+        /// from the tray and is still playing its depletion animation. Returns the tray root position (or this
+        /// transform's position) if the tank has no view.
         /// </summary>
         /// <param name="tank">Tank model.</param>
         /// <returns>The muzzle position.</returns>
@@ -174,12 +176,12 @@ namespace PixelFlow.View
             if (tank != null)
             {
                 if (_views.TryGetValue(tank.Id, out ColorTankView view))
-                    return view.MuzzlePosition;
+                    return view.TargetMuzzlePosition;
 
                 for (int i = 0; i < _depleting.Count; i++)
                 {
                     if (_depleting[i].Model == tank)
-                        return _depleting[i].MuzzlePosition;
+                        return _depleting[i].TargetMuzzlePosition;
                 }
             }
 

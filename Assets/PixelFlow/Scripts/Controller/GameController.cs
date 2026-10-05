@@ -28,6 +28,7 @@ namespace PixelFlow.Controller
         private const int CellPoolPrewarm = 128;
         private const int DestroyQueueCapacity = 256;
         private const float RaycastDistance = 100f;
+        private const float MinFireInterval = 0.001f;
 
         /// <summary>
         /// One arrived projectile waiting for its cell to be destroyed.
@@ -66,9 +67,11 @@ namespace PixelFlow.Controller
         [SerializeField] private Rect boardArea = new Rect(-4.5f, -1f, 9f, 9f);
 
         [Tooltip("Seconds between two shooting steps.")]
+        [Min(MinFireInterval)]
         [SerializeField] private float fireInterval = 0.06f;
 
         [Tooltip("Maximum number of cells destroyed per frame.")]
+        [Min(1)]
         [SerializeField] private int destroysPerFrame = 64;
 
         private ObjectPool<PixelCellView> _cellPool;
@@ -91,7 +94,7 @@ namespace PixelFlow.Controller
 
         /// <summary>
         /// Current game state. <see cref="GameState.Won"/>/<see cref="GameState.Lost"/> are only set once the
-        /// rules report them and no projectile or pending destroy is left.
+        /// rules report them and no projectile, pending destroy or cell destroy animation is left.
         /// </summary>
         public GameState State { get; private set; }
 
@@ -123,6 +126,10 @@ namespace PixelFlow.Controller
         private void Awake()
         {
             Application.targetFrameRate = 60;
+
+            // [Min] only guards the inspector; also clamp values set by other means (e.g. scripts, YAML).
+            fireInterval = Mathf.Max(fireInterval, MinFireInterval);
+            destroysPerFrame = Mathf.Max(destroysPerFrame, 1);
 
             _onArrived = HandleArrived;
             _handleDestroy = HandleDestroy;
@@ -169,19 +176,20 @@ namespace PixelFlow.Controller
         }
 
         /// <summary>
-        /// Loads <c>levels[index]</c>: clears projectiles, pending destroys, tank views and the board, creates a
-        /// fresh <see cref="LevelSession"/>, fits and builds the board and tanks, resets the HUD and sets
-        /// <see cref="State"/> to <see cref="GameState.Playing"/>. The load time is logged.
+        /// Loads <c>levels[index]</c>: creates a fresh <see cref="LevelSession"/> (validating the data) first, then
+        /// clears projectiles, pending destroys, tank views and the board, fits and builds the board and tanks,
+        /// resets the HUD and sets <see cref="State"/> to <see cref="GameState.Playing"/>. The load time is logged.
+        /// If the level data is invalid nothing changes: the previous level stays loaded and playable.
         /// </summary>
         /// <param name="index">Index into the levels array.</param>
         /// <exception cref="ArgumentOutOfRangeException">Thrown if index is outside the levels array.</exception>
+        /// <exception cref="ArgumentException">Thrown if the level data is invalid (see <see cref="LevelSession.Create"/>).</exception>
         public void LoadLevel(int index)
         {
             if (levels == null || index < 0 || index >= levels.Length)
                 throw new ArgumentOutOfRangeException(nameof(index));
 
-            _currentIndex = index;
-            LoadLevel(levels[index]);
+            Load(levels[index], index);
         }
 
         /// <summary>
@@ -191,13 +199,26 @@ namespace PixelFlow.Controller
         /// </summary>
         /// <param name="data">Level to load.</param>
         /// <exception cref="ArgumentNullException">Thrown if data is null.</exception>
+        /// <exception cref="ArgumentException">
+        /// Thrown if the level data is invalid (see <see cref="LevelSession.Create"/>); the previous level stays loaded.
+        /// </exception>
         public void LoadLevel(LevelData data)
+        {
+            Load(data, _currentIndex);
+        }
+
+        private void Load(LevelData data, int index)
         {
             if (data == null)
                 throw new ArgumentNullException(nameof(data));
 
             _loadWatch.Restart();
 
+            // Validate and build the model first: if the data is invalid this throws before anything of the
+            // current level is torn down, so the previous level stays loaded and playable.
+            LevelSession session = LevelSession.Create(data);
+
+            _currentIndex = index;
             projectiles.ClearAll();
             _destroyQueue.Clear();
             ReleaseActiveCells();
@@ -207,7 +228,7 @@ namespace PixelFlow.Controller
             gridRenderer.Clear();
 
             _currentData = data;
-            _session = LevelSession.Create(data);
+            _session = session;
             _layout = BoardLayout.Fit(_session.Width, _session.Height, boardArea);
             gridRenderer.Build(_session.Grid, _session.Palette, _layout);
             tankBoard.Build(_session);
@@ -251,7 +272,8 @@ namespace PixelFlow.Controller
             _destroyQueue.Process(destroysPerFrame, _handleDestroy);
 
             GameState rules = GameRules.Evaluate(_session.Grid, _session.Tray, _session.Supply, _session.Shooting);
-            if (rules != GameState.Playing && projectiles.ActiveCount == 0 && _destroyQueue.Count == 0)
+            if (rules != GameState.Playing && projectiles.ActiveCount == 0 && _destroyQueue.Count == 0 &&
+                _activeCells.Count == 0)
             {
                 State = rules;
                 if (rules == GameState.Won)
