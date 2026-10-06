@@ -162,20 +162,21 @@ namespace PixelFlow.Tests
         }
 
         [Test]
-        public void RemoveCell_NotExposed_Throws()
+        public void RemoveCell_NotAFrontFromAnySide_Throws()
         {
-            // Arrange: 1x2 grid
-            // rows[0] = top = "0"     → y=1 (not exposed)
-            // rows[1] = bottom = "1"  → y=0 (exposed)
+            // Arrange: 3x3 grid with center cell surrounded on all sides
+            // rows[0] = top = "000"    → y=2
+            // rows[1] = middle = "010" → y=1 (center cell is not a front from any side)
+            // rows[2] = bottom = "000" → y=0
             var level = TestLevels.Create(
-                new[] { "0", "1" },
+                new[] { "000", "010", "000" },
                 new Color32[] { Color.red, Color.green },
                 new ColorTankData[0]
             );
             var model = new PixelGridModel(level.width, level.height, level.cells);
 
-            // Act & Assert: Trying to remove a non-exposed cell should throw
-            Assert.Throws<InvalidOperationException>(() => model.RemoveCell(new Vector2Int(0, 1)));
+            // Act & Assert: Trying to remove a cell that's not a front from any side should throw
+            Assert.Throws<InvalidOperationException>(() => model.RemoveCell(new Vector2Int(1, 1)));
         }
 
         [Test]
