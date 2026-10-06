@@ -33,24 +33,30 @@ MonoBehaviour:
     ammo: 12
   - colorId: 3
     ammo: 12
-  - colorId: 3
-    ammo: 12
-  - colorId: 3
-    ammo: 5
-  - colorId: 0
-    ammo: 12
-  - colorId: 0
-    ammo: 12
-  - colorId: 0
-    ammo: 12
-  - colorId: 0
-    ammo: 12
   - colorId: 1
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 3
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 0
     ammo: 12
   - colorId: 2
     ammo: 4
-  - colorId: 0
-    ammo: 12
+  - colorId: 3
+    ammo: 5
   - colorId: 0
     ammo: 12
   - colorId: 0
@@ -63,12 +69,6 @@ MonoBehaviour:
     ammo: 12
   - colorId: 1
     ammo: 8
-  - colorId: 0
-    ammo: 12
-  - colorId: 0
-    ammo: 12
-  - colorId: 0
-    ammo: 12
   - colorId: 0
     ammo: 2
   laneCount: 3

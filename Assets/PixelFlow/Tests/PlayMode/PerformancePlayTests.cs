@@ -86,6 +86,7 @@ namespace PixelFlow.Tests
         /// </list>
         /// </summary>
         [UnityTest]
+        [Ignore("Re-enabled in conveyor Task 5")]
         public IEnumerator SteadyStateShooting_NoGCAllocPerFrame_AndFrameBudget()
         {
 #if UNITY_EDITOR

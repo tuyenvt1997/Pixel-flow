@@ -95,6 +95,33 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
+        /// The peel order follows the belt sweep: on a 2x2 board with colour 1 at the top-left, one round visits
+        /// Bottom col 0 (0,0), Bottom col 1 (1,0), Right row 0 (empty), Right row 1 (1,1), Top col 1 (empty) and
+        /// Top col 0 (0,1), so the colour-1 cell is peeled last.
+        /// </summary>
+        [Test]
+        public void Generate_PeelOrder_FollowsBeltSweep()
+        {
+            var level = TestLevels.Create(new[] { "10", "00" }, new Color32[] { Color.red, Color.blue }, new ColorTankData[0]);
+            try
+            {
+                ColorTankData[] tanks = TankGenerator.Generate(level.width, level.height, level.cells, 1);
+
+                var colours = new int[tanks.Length];
+                for (int i = 0; i < tanks.Length; i++)
+                {
+                    colours[i] = tanks[i].colorId;
+                    Assert.AreEqual(1, tanks[i].ammo, $"ammo of tank {i}");
+                }
+                CollectionAssert.AreEqual(new[] { 0, 0, 0, 1 }, colours);
+            }
+            finally
+            {
+                Object.DestroyImmediate(level);
+            }
+        }
+
+        /// <summary>
         /// Distinct RGB colors map to palette entries in order of appearance; transparent pixels become empty.
         /// </summary>
         [Test]
@@ -129,7 +156,7 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
-        /// The 64x64 sample level has 4096 filled cells and the greedy AutoPlayer can win it.
+        /// The 64x64 sample level has 4096 filled cells and the BeltAutoPlayer can win it under the conveyor-belt rules.
         /// </summary>
         [Test]
         public void SampleLevel_Has4096Cells_AndIsSolvableByAutoPlayer()
@@ -148,7 +175,7 @@ namespace PixelFlow.Tests
                 Assert.AreEqual(3, level.laneCount);
                 Assert.AreEqual(5, level.slotCount);
 
-                Assert.AreEqual(GameState.Won, AutoPlayer.Play(LevelSession.Create(level)));
+                Assert.AreEqual(GameState.Won, BeltAutoPlayer.Play(LevelSession.Create(level)));
             }
             finally
             {

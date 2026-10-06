@@ -27,9 +27,13 @@ MonoBehaviour:
     ammo: 8
   - colorId: 2
     ammo: 8
+  - colorId: 2
+    ammo: 8
+  - colorId: 0
+    ammo: 8
   - colorId: 1
     ammo: 8
-  - colorId: 2
+  - colorId: 0
     ammo: 8
   - colorId: 0
     ammo: 8
@@ -38,10 +42,6 @@ MonoBehaviour:
   - colorId: 0
     ammo: 8
   - colorId: 1
-    ammo: 8
-  - colorId: 0
-    ammo: 8
-  - colorId: 0
     ammo: 8
   - colorId: 0
     ammo: 8

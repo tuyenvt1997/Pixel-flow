@@ -35,63 +35,63 @@ MonoBehaviour:
     ammo: 15
   - colorId: 4
     ammo: 15
-  - colorId: 0
+  - colorId: 4
     ammo: 15
   - colorId: 4
+    ammo: 15
+  - colorId: 1
+    ammo: 15
+  - colorId: 0
     ammo: 15
   - colorId: 3
     ammo: 15
   - colorId: 0
     ammo: 15
-  - colorId: 0
+  - colorId: 4
     ammo: 15
   - colorId: 4
+    ammo: 15
+  - colorId: 1
+    ammo: 15
+  - colorId: 1
+    ammo: 15
+  - colorId: 0
     ammo: 15
   - colorId: 3
     ammo: 15
+  - colorId: 4
+    ammo: 15
+  - colorId: 4
+    ammo: 15
+  - colorId: 1
+    ammo: 15
+  - colorId: 2
+    ammo: 15
+  - colorId: 0
+    ammo: 15
   - colorId: 0
     ammo: 15
   - colorId: 4
     ammo: 15
+  - colorId: 1
+    ammo: 15
+  - colorId: 0
+    ammo: 15
+  - colorId: 4
+    ammo: 4
   - colorId: 0
     ammo: 15
   - colorId: 3
     ammo: 7
   - colorId: 2
-    ammo: 15
-  - colorId: 0
-    ammo: 15
-  - colorId: 4
-    ammo: 15
-  - colorId: 4
-    ammo: 15
-  - colorId: 0
-    ammo: 15
-  - colorId: 2
     ammo: 9
+  - colorId: 1
+    ammo: 3
   - colorId: 0
-    ammo: 15
-  - colorId: 4
     ammo: 15
   - colorId: 0
     ammo: 15
   - colorId: 0
     ammo: 6
-  - colorId: 1
-    ammo: 15
-  - colorId: 1
-    ammo: 15
-  - colorId: 4
-    ammo: 15
-  - colorId: 1
-    ammo: 15
-  - colorId: 1
-    ammo: 15
-  - colorId: 1
-    ammo: 15
-  - colorId: 4
-    ammo: 4
-  - colorId: 1
-    ammo: 3
   laneCount: 3
   slotCount: 5

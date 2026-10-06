@@ -29,10 +29,10 @@ MonoBehaviour:
     ammo: 5
   - colorId: 0
     ammo: 5
-  - colorId: 1
-    ammo: 3
   - colorId: 0
     ammo: 5
+  - colorId: 1
+    ammo: 3
   - colorId: 0
     ammo: 5
   - colorId: 0

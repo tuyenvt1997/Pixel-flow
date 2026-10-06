@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using PixelFlow.Data;
+using UnityEngine;
 
 namespace PixelFlow.Core
 {
@@ -8,12 +9,13 @@ namespace PixelFlow.Core
     /// Generates the supply tanks for a level from its cell layout.
     /// </summary>
     /// <remarks>
-    /// The grid is "peeled" layer by layer: each round removes every currently exposed cell
-    /// (the lowest non-empty cell of each column), visiting columns 0 to width-1, and gives each
-    /// removed cell an increasing peel time <c>t</c>. For each color, its cells are taken in peel order
-    /// and chunked into tanks of at most <c>ammoPerTank</c> shots. The sort key of a tank is the peel time
-    /// of the first cell in its chunk; tanks are returned in ascending key order (ties broken by colorId),
-    /// so colors reach the tray roughly when their cells become exposed.
+    /// The grid is "peeled" by belt sweeps: each round visits positions <c>0..L-1</c> of
+    /// <see cref="BeltPath"/>(width, height) and removes that position's current front cell, so a cell already
+    /// removed earlier in the round is skipped and the next cell inward on that line is taken instead. Each removed
+    /// cell gets an increasing peel time <c>t</c>; rounds repeat until the grid is empty. For each color, its cells
+    /// are taken in peel order and chunked into tanks of at most <c>ammoPerTank</c> shots. The sort key of a tank is
+    /// the peel time of the first cell in its chunk; tanks are returned in ascending key order (ties broken by
+    /// colorId), so colors reach the belt roughly when their cells reach a front.
     /// </remarks>
     public static class TankGenerator
     {
@@ -41,17 +43,9 @@ namespace PixelFlow.Core
             if (ammoPerTank < 1)
                 throw new ArgumentException("ammoPerTank must be at least 1.", nameof(ammoPerTank));
 
-            // Front index per column = y of the lowest non-empty cell not yet peeled (height = column empty).
-            var front = new int[width];
-            int remaining = 0;
-            for (int x = 0; x < width; x++)
-            {
-                front[x] = NextFilled(cells, width, height, x, 0);
-                for (int y = 0; y < height; y++)
-                {
-                    if (cells[y * width + x] != LevelData.EmptyCell) remaining++;
-                }
-            }
+            // Scratch grid: its four-sided fronts give each belt position's current front cell.
+            var grid = new PixelGridModel(width, height, cells);
+            var path = new BeltPath(width, height);
 
             // Peel round by round; t increases with each removed cell.
             var keyed = new List<KeyedTank>();
@@ -59,14 +53,14 @@ namespace PixelFlow.Core
             for (int i = 0; i < openTank.Length; i++) openTank[i] = -1;
 
             int t = 0;
-            while (remaining > 0)
+            while (grid.RemainingCount > 0)
             {
-                for (int x = 0; x < width; x++)
+                for (int position = 0; position < path.Length; position++)
                 {
-                    int y = front[x];
-                    if (y >= height) continue;
+                    path.Resolve(position, out BoardSide side, out int line);
+                    if (!grid.TryGetFront(side, line, out Vector2Int cell)) continue;
 
-                    byte color = cells[y * width + x];
+                    byte color = grid.GetCell(cell.x, cell.y);
                     int open = openTank[color];
                     if (open >= 0 && keyed[open].Tank.ammo < ammoPerTank)
                     {
@@ -81,8 +75,7 @@ namespace PixelFlow.Core
                     }
 
                     t++;
-                    remaining--;
-                    front[x] = NextFilled(cells, width, height, x, y + 1);
+                    grid.RemoveCell(cell);
                 }
             }
 
@@ -94,13 +87,6 @@ namespace PixelFlow.Core
                 result[i] = keyed[i].Tank;
             }
             return result;
-        }
-
-        private static int NextFilled(byte[] cells, int width, int height, int x, int fromY)
-        {
-            int y = fromY;
-            while (y < height && cells[y * width + x] == LevelData.EmptyCell) y++;
-            return y;
         }
 
         private static int CompareKeyed(KeyedTank a, KeyedTank b)

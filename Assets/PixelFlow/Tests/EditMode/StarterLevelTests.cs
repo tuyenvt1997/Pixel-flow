@@ -134,7 +134,7 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
-        /// The greedy AutoPlayer wins every starter level with the level's own lanes and slots.
+        /// The BeltAutoPlayer wins every starter level under the conveyor-belt rules with the level's own lanes and slots.
         /// </summary>
         [TestCase(1)]
         [TestCase(2)]
@@ -146,7 +146,7 @@ namespace PixelFlow.Tests
             LevelData level = StarterLevelFactory.Create(number);
             try
             {
-                Assert.AreEqual(GameState.Won, AutoPlayer.Play(LevelSession.Create(level)));
+                Assert.AreEqual(GameState.Won, BeltAutoPlayer.Play(LevelSession.Create(level)));
             }
             finally
             {

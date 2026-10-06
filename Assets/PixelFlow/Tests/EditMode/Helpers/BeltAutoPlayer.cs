@@ -28,16 +28,30 @@ namespace PixelFlow.Tests
                     return state;
                 }
 
-                if (!s.Belt.IsFull && !TryLaunchFromSlots(s))
-                {
-                    TryLaunchFromLanes(s);
-                }
-
-                shots.Clear();
-                s.BeltShooting.Tick(shots);
+                Step(s, shots);
             }
 
             return GameRules.Evaluate(s.Grid, s.Belt, s.Tray, s.Supply, s.BeltShooting);
+        }
+
+        /// <summary>
+        /// Runs one bot tick: (1) if the belt plus queue is below capacity, launch the first waiting-slot tank whose
+        /// colour has a front; (2) otherwise, if still below capacity, launch the lane-front tank with the smallest
+        /// <c>Id</c>; (3) clear <paramref name="shots"/> and run one belt tick. Allocation-free when
+        /// <paramref name="shots"/> has enough capacity.
+        /// </summary>
+        /// <param name="s">The session to play (mutated in place).</param>
+        /// <param name="shots">Scratch list that receives this tick's shots.</param>
+        /// <returns>The number of shots fired this tick.</returns>
+        public static int Step(LevelSession s, List<ShotEvent> shots)
+        {
+            if (!s.Belt.IsFull && !TryLaunchFromSlots(s))
+            {
+                TryLaunchFromLanes(s);
+            }
+
+            shots.Clear();
+            return s.BeltShooting.Tick(shots);
         }
 
         private static bool TryLaunchFromSlots(LevelSession s)

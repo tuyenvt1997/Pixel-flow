@@ -31,6 +31,10 @@ MonoBehaviour:
     ammo: 10
   - colorId: 0
     ammo: 10
+  - colorId: 1
+    ammo: 10
+  - colorId: 1
+    ammo: 10
   - colorId: 0
     ammo: 10
   - colorId: 1
@@ -41,19 +45,11 @@ MonoBehaviour:
     ammo: 10
   - colorId: 2
     ammo: 4
-  - colorId: 1
-    ammo: 10
   - colorId: 0
     ammo: 10
   - colorId: 0
     ammo: 10
   - colorId: 0
-    ammo: 10
-  - colorId: 0
-    ammo: 10
-  - colorId: 0
-    ammo: 10
-  - colorId: 1
     ammo: 10
   - colorId: 0
     ammo: 10
@@ -61,9 +57,13 @@ MonoBehaviour:
     ammo: 2
   - colorId: 0
     ammo: 10
+  - colorId: 1
+    ammo: 10
   - colorId: 0
     ammo: 10
-  - colorId: 1
+  - colorId: 0
+    ammo: 10
+  - colorId: 0
     ammo: 10
   - colorId: 0
     ammo: 6

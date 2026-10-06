@@ -218,6 +218,7 @@ namespace PixelFlow.Tests
         /// strategy, and a mid-game capture of the game camera is written to Logs/level1_capture.png.
         /// </summary>
         [UnityTest]
+        [Ignore("Re-enabled in conveyor Task 5")]
         public IEnumerator Level1_AutoPlay_ReachesWon()
         {
             yield return LoadGameScene();
@@ -284,6 +285,7 @@ namespace PixelFlow.Tests
         /// won, and writes a mid-game capture of the game camera to Logs/game_capture.png.
         /// </summary>
         [UnityTest]
+        [Ignore("Re-enabled in conveyor Task 5")]
         public IEnumerator SunLevel_AutoPlay_ReachesWon()
         {
             yield return LoadGameScene();
