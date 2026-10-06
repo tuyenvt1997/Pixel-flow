@@ -479,7 +479,8 @@ namespace PixelFlow.Tests
         /// <summary>
         /// Starter level 3 (16x16) is played with the <c>AutoPlayer</c> policy until a quarter of its pixels are
         /// gone with at least three tanks on the belt and projectiles in flight; the game camera is then captured to
-        /// Logs/belt_capture.png for a visual check of the belt layout (track, chevrons, counter, slots, lanes).
+        /// Logs/belt_capture.png for a visual check of the belt layout (track, chevrons, counter, slots, lanes); the win
+        /// and lose popups are then shown over the paused board and captured to Logs/ui_win.png and Logs/ui_lose.png.
         /// </summary>
         [UnityTest]
         public IEnumerator Level3_MidGame_CapturesBelt()
@@ -505,6 +506,18 @@ namespace PixelFlow.Tests
 
             CaptureCamera("belt_capture.png");
             Assert.IsTrue(File.Exists(Path.Combine(Application.dataPath, "..", "Logs", "belt_capture.png")));
+
+            // The result popups over the same mid-game board, for a visual check of the HUD skin.
+            Time.timeScale = 0f;
+            _hud.ShowWin();
+            yield return null;
+            CaptureCamera("ui_win.png");
+            _hud.ShowLose();
+            yield return null;
+            CaptureCamera("ui_lose.png");
+            _hud.HideAll();
+            Assert.IsTrue(File.Exists(Path.Combine(Application.dataPath, "..", "Logs", "ui_win.png")));
+            Assert.IsTrue(File.Exists(Path.Combine(Application.dataPath, "..", "Logs", "ui_lose.png")));
         }
 
         /// <summary>
@@ -800,6 +813,11 @@ namespace PixelFlow.Tests
             return best;
         }
 
+        /// <summary>
+        /// Renders the main camera together with the HUD into a 540x960 texture and writes it to Logs/<paramref name="fileName"/>.
+        /// The overlay HUD canvas is switched to screen-space-camera for the render (with the scale factor its
+        /// CanvasScaler would use at that resolution) so popups and the level pill appear in the capture, then restored.
+        /// </summary>
         private void CaptureCamera(string fileName)
         {
             const int width = 540;
@@ -809,9 +827,29 @@ namespace PixelFlow.Tests
 
             var rt = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
             RenderTexture previousTarget = cam.targetTexture;
+            Canvas canvas = _hud != null ? _hud.GetComponent<Canvas>() : null;
+            CanvasScaler scaler = _hud != null ? _hud.GetComponent<CanvasScaler>() : null;
+            RenderMode previousMode = canvas != null ? canvas.renderMode : RenderMode.ScreenSpaceOverlay;
+            bool scalerWasEnabled = scaler != null && scaler.enabled;
+            float previousScale = canvas != null ? canvas.scaleFactor : 1f;
             try
             {
                 cam.targetTexture = rt;
+                if (canvas != null)
+                {
+                    if (scaler != null)
+                    {
+                        scaler.enabled = false;
+                        Vector2 reference = scaler.referenceResolution;
+                        float logW = Mathf.Log(width / reference.x, 2f);
+                        float logH = Mathf.Log(height / reference.y, 2f);
+                        canvas.scaleFactor = Mathf.Pow(2f, Mathf.Lerp(logW, logH, scaler.matchWidthOrHeight));
+                    }
+                    canvas.renderMode = RenderMode.ScreenSpaceCamera;
+                    canvas.worldCamera = cam;
+                    canvas.planeDistance = 1f;
+                    Canvas.ForceUpdateCanvases();
+                }
                 _grid.Draw();
                 var request = new RenderPipeline.StandardRequest { destination = rt };
                 if (RenderPipeline.SupportsRenderRequest(cam, request))
@@ -833,6 +871,14 @@ namespace PixelFlow.Tests
             }
             finally
             {
+                if (canvas != null)
+                {
+                    canvas.renderMode = previousMode;
+                    canvas.worldCamera = null;
+                    canvas.scaleFactor = previousScale;
+                    if (scaler != null)
+                        scaler.enabled = scalerWasEnabled;
+                }
                 cam.targetTexture = previousTarget;
                 rt.Release();
                 Object.Destroy(rt);
