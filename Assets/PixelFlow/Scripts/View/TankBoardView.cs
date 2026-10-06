@@ -7,32 +7,79 @@ using UnityEngine;
 namespace PixelFlow.View
 {
     /// <summary>
-    /// Presents every tank of a <see cref="LevelSession"/>: supply lanes and the tray. Views come from an
+    /// Where a picked tank currently is, as resolved by <see cref="TankBoardView.TryGetTank"/>.
+    /// </summary>
+    public enum TankLocation
+    {
+        /// <summary>
+        /// Front tank of a supply lane (tapping it launches it).
+        /// </summary>
+        LaneFront,
+
+        /// <summary>
+        /// Tank waiting in a waiting slot (tapping it relaunches it).
+        /// </summary>
+        Slot,
+
+        /// <summary>
+        /// Anywhere else: deeper in a supply lane, in the entrance queue or on the belt.
+        /// </summary>
+        Other
+    }
+
+    /// <summary>
+    /// Presents every tank of a <see cref="LevelSession"/> across the supply lanes, the belt entrance queue, the
+    /// belt and the waiting slots, plus one empty frame per waiting slot. Views come from an
     /// <see cref="ObjectPool{T}"/> of <see cref="ColorTankView"/> and are mapped by tank id.
     /// <para>Layout (offsets applied in the root's rotation, root scale ignored):</para>
     /// <list type="bullet">
     /// <item>Supply: lane <c>i</c> is centred around <c>supplyRoot</c> on x at
     /// <c>(i - (laneCount - 1) / 2) * laneSpacing</c>; the lane front (row 0) sits at the root and row <c>r</c>
     /// is <c>r * rowSpacing</c> further down (-y).</item>
-    /// <item>Tray: slot <c>s</c> is centred around <c>trayRoot</c> on x at
+    /// <item>Waiting slots: slot <c>s</c> is centred around <c>trayRoot</c> on x at
     /// <c>(s - (capacity - 1) / 2) * slotSpacing</c>.</item>
+    /// <item>Entrance queue and belt: positions from <see cref="BeltView"/>; tanks there are scaled to fit the track.</item>
     /// </list>
-    /// <see cref="Build"/> snaps views into place; later model changes (<see cref="SupplyModel.OnLaneChanged"/>,
-    /// <see cref="SlotQueueManager.OnTankAdded"/>, <see cref="SlotQueueManager.OnTankRemoved"/>) tween them with
-    /// <see cref="ColorTankView.MoveTo"/>. A removed (depleted) tank plays a short scale-down
-    /// (<see cref="ColorTankView.PlayDeplete"/>) and is then unbound and returned to the pool; during that
-    /// animation it can no longer be picked, but <see cref="GetMuzzle"/> still resolves it so its final shot can
-    /// be launched.
+    /// Model events tween the views: <see cref="SupplyModel.OnLaneChanged"/> and the waiting-slot events move them with
+    /// <see cref="ColorTankView.MoveTo"/>; <see cref="BeltModel.OnTankQueued"/> sends a tank to the entrance; belt
+    /// tanks then glide smoothly from position to position (one position per tick interval) in <c>Update</c>. A tank
+    /// leaving the belt with ammo left goes to its waiting slot; a depleted one plays
+    /// <see cref="ColorTankView.PlayDeplete"/> where it is and is then returned to the pool. Nothing allocates per frame.
     /// </summary>
     public sealed class TankBoardView : MonoBehaviour
     {
+        private const float EnterBlendSeconds = 0.12f;
+        private const float SlotFrameDepth = 0.6f;
+        private const float BeltTankFill = 0.8f;
+
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+
+        /// <summary>
+        /// One tank riding the belt: its view, the position the model reports and the smoothly animated position.
+        /// </summary>
+        private struct Rider
+        {
+            public ColorTankModel tank;
+            public ColorTankView view;
+            public int target;
+            public float display;
+            public Vector3 blendFrom;
+            public float blend;
+        }
+
         [Tooltip("Tank view prefab. Instantiated only by the pool factory.")]
         [SerializeField] private ColorTankView tankPrefab;
+
+        [Tooltip("Empty waiting-slot frame (no collider). One is shown per waiting slot.")]
+        [SerializeField] private Transform slotFramePrefab;
+
+        [Tooltip("Colour of the empty waiting-slot frames.")]
+        [SerializeField] private Color slotFrameColor = new Color(0.17f, 0.18f, 0.3f, 1f);
 
         [Tooltip("Anchor of the supply lanes (front row, centred between lanes).")]
         [SerializeField] private Transform supplyRoot;
 
-        [Tooltip("Anchor of the tray (centred between slots).")]
+        [Tooltip("Anchor of the waiting slots (centred between slots).")]
         [SerializeField] private Transform trayRoot;
 
         [Tooltip("Horizontal distance between supply lanes.")]
@@ -41,19 +88,35 @@ namespace PixelFlow.View
         [Tooltip("Vertical distance between rows in a supply lane.")]
         [SerializeField] private float rowSpacing = 1.2f;
 
-        [Tooltip("Horizontal distance between tray slots.")]
+        [Tooltip("Horizontal distance between waiting slots.")]
         [SerializeField] private float slotSpacing = 1.2f;
 
         private readonly Dictionary<int, ColorTankView> _views = new Dictionary<int, ColorTankView>();
         private readonly List<ColorTankView> _depleting = new List<ColorTankView>();
+        private readonly List<ColorTankModel> _queued = new List<ColorTankModel>();
+        private readonly List<Transform> _slotFrames = new List<Transform>();
+        private Rider[] _riders = new Rider[0];
+        private int _riderCount;
 
         private ObjectPool<ColorTankView> _pool;
         private LevelSession _session;
+        private BeltView _belt;
+        private MaterialPropertyBlock _frameProps;
 
         private Action<int> _onLaneChanged;
         private Action<ColorTankModel, int> _onTankAdded;
         private Action<ColorTankModel, int> _onTankRemoved;
+        private Action<ColorTankModel> _onTankQueued;
+        private Action<ColorTankModel> _onTankEntered;
+        private Action<ColorTankModel, int> _onTankMoved;
+        private Action<ColorTankModel, bool> _onTankLeft;
         private Action<ColorTankView> _onDepleteFinished;
+
+        /// <summary>
+        /// Seconds one belt lap takes; belt tanks glide <c>Length / LapSeconds</c> positions per second. Set by the
+        /// controller before <see cref="Build"/>.
+        /// </summary>
+        public float LapSeconds { get; set; } = 4f;
 
         /// <summary>
         /// Number of tank views currently shown (bound views, including those still playing depletion).
@@ -72,27 +135,37 @@ namespace PixelFlow.View
 
         /// <summary>
         /// Shows <paramref name="session"/>: clears any previous board, takes one pooled view per tank in the
-        /// supply lanes and in the tray, binds it with its palette colour, snaps it to its layout position and
-        /// subscribes to supply and tray events.
+        /// supply lanes and the waiting slots, binds it with its palette colour, snaps it to its layout position,
+        /// shows one empty frame per waiting slot, resets the belt counter and subscribes to the supply, waiting-slot
+        /// and belt events.
         /// </summary>
         /// <param name="session">Level session to present.</param>
-        /// <exception cref="ArgumentNullException">Thrown if session is null.</exception>
-        public void Build(LevelSession session)
+        /// <param name="belt">Belt view, already built for this session's board.</param>
+        /// <exception cref="ArgumentNullException">Thrown if session or belt is null.</exception>
+        public void Build(LevelSession session, BeltView belt)
         {
             if (session == null)
                 throw new ArgumentNullException(nameof(session));
+            if (belt == null)
+                throw new ArgumentNullException(nameof(belt));
 
             EnsureInitialised();
             Clear();
             _session = session;
+            _belt = belt;
 
-            // Size the pool and the depletion list for every tank of the level now, so releasing a depleted
-            // view during play never grows a container.
+            // Size the pool and every container for all tanks of the level now, so play never grows one.
             SupplyModel supply = session.Supply;
-            int tankCount = supply.TotalRemaining + session.Tray.Count;
+            SlotQueueManager slots = session.Tray;
+            BeltModel beltModel = session.Belt;
+            int tankCount = supply.TotalRemaining + slots.Count + beltModel.Count + beltModel.QueuedCount;
             _pool.Prewarm(tankCount);
             if (_depleting.Capacity < tankCount)
                 _depleting.Capacity = tankCount;
+            if (_queued.Capacity < beltModel.Capacity)
+                _queued.Capacity = beltModel.Capacity;
+            if (_riders.Length < beltModel.Capacity)
+                _riders = new Rider[beltModel.Capacity];
 
             for (int lane = 0; lane < supply.LaneCount; lane++)
             {
@@ -101,23 +174,37 @@ namespace PixelFlow.View
                     Spawn(tanks[row]).SnapTo(LanePosition(lane, row));
             }
 
-            SlotQueueManager tray = session.Tray;
-            for (int slot = 0; slot < tray.Count; slot++)
-                Spawn(tray[slot]).SnapTo(SlotPosition(slot));
+            for (int slot = 0; slot < slots.Count; slot++)
+                Spawn(slots[slot]).SnapTo(SlotPosition(slot));
+
+            ShowSlotFrames(slots.Capacity);
+            UpdateCounter();
 
             supply.OnLaneChanged += _onLaneChanged;
-            tray.OnTankAdded += _onTankAdded;
-            tray.OnTankRemoved += _onTankRemoved;
+            slots.OnTankAdded += _onTankAdded;
+            slots.OnTankRemoved += _onTankRemoved;
+            beltModel.OnTankQueued += _onTankQueued;
+            beltModel.OnTankEntered += _onTankEntered;
+            beltModel.OnTankMoved += _onTankMoved;
+            beltModel.OnTankLeft += _onTankLeft;
         }
 
         /// <summary>
-        /// Unsubscribes from the current session and returns every view (including depleting ones) to the pool.
-        /// Safe to call when nothing is built.
+        /// Unsubscribes from the current session, returns every view (including depleting ones) to the pool and
+        /// hides the slot frames. Safe to call when nothing is built.
         /// </summary>
         public void Clear()
         {
             Unsubscribe();
             _session = null;
+            _belt = null;
+            _queued.Clear();
+            for (int i = 0; i < _riderCount; i++)
+                _riders[i] = default;
+            _riderCount = 0;
+
+            for (int i = 0; i < _slotFrames.Count; i++)
+                _slotFrames[i].gameObject.SetActive(false);
 
             if (_pool == null)
                 return;
@@ -139,16 +226,21 @@ namespace PixelFlow.View
         }
 
         /// <summary>
-        /// Resolves a raycast hit to a tank model. Returns true only for a view that is currently bound and not
-        /// depleting; the caller decides whether the tank may be tapped (e.g. lane front only).
+        /// Resolves a raycast hit to a tank model and where that tank is. Returns true only for a view that is
+        /// currently bound and not depleting; the caller decides whether the tank may be tapped.
         /// </summary>
         /// <param name="hit">Collider returned by the raycast (may belong to a child of the tank view).</param>
         /// <param name="tank">The tank model on success, otherwise null.</param>
+        /// <param name="where">
+        /// <see cref="TankLocation.LaneFront"/> for a supply-lane front, <see cref="TankLocation.Slot"/> for a
+        /// waiting-slot tank, otherwise <see cref="TankLocation.Other"/>.
+        /// </param>
         /// <returns>True if <paramref name="hit"/> belongs to a live tank view of this board.</returns>
-        public bool TryGetTank(Collider hit, out ColorTankModel tank)
+        public bool TryGetTank(Collider hit, out ColorTankModel tank, out TankLocation where)
         {
             tank = null;
-            if (hit == null)
+            where = TankLocation.Other;
+            if (hit == null || _session == null)
                 return false;
 
             ColorTankView view = hit.GetComponentInParent<ColorTankView>();
@@ -159,15 +251,19 @@ namespace PixelFlow.View
                 return false;
 
             tank = view.Model;
+            if (_session.Supply.FindLaneWithFront(tank) >= 0)
+                where = TankLocation.LaneFront;
+            else if (_session.Tray.IndexOf(tank) >= 0)
+                where = TankLocation.Slot;
             return true;
         }
 
         /// <summary>
-        /// World-space muzzle of the view presenting <paramref name="tank"/>, taken at the view's tween destination
-        /// (<see cref="ColorTankView.TargetMuzzlePosition"/>): a tank that has just entered the tray fires from its
-        /// slot, not from the lane it is still flying away from. Also resolves a tank that has just been removed
-        /// from the tray and is still playing its depletion animation. Returns the tray root position (or this
-        /// transform's position) if the tank has no view.
+        /// World-space muzzle of <paramref name="tank"/>. For a tank on the belt this is its belt world position
+        /// (<see cref="BeltView.PositionToWorld"/> of its animated position). Otherwise it is the view's muzzle at
+        /// its tween destination (<see cref="ColorTankView.TargetMuzzlePosition"/>), also for a tank still playing
+        /// its depletion animation. Returns the slot root position (or this transform's position) if the tank has
+        /// no view.
         /// </summary>
         /// <param name="tank">Tank model.</param>
         /// <returns>The muzzle position.</returns>
@@ -175,6 +271,10 @@ namespace PixelFlow.View
         {
             if (tank != null)
             {
+                int rider = FindRider(tank);
+                if (rider >= 0)
+                    return _belt.PositionToWorld(_riders[rider].display);
+
                 if (_views.TryGetValue(tank.Id, out ColorTankView view))
                     return view.TargetMuzzlePosition;
 
@@ -202,7 +302,7 @@ namespace PixelFlow.View
         }
 
         /// <summary>
-        /// World-space position of tray slot <paramref name="slot"/>.
+        /// World-space position of waiting slot <paramref name="slot"/>.
         /// </summary>
         /// <param name="slot">Slot index (0 = leftmost).</param>
         /// <returns>Layout position.</returns>
@@ -211,6 +311,33 @@ namespace PixelFlow.View
             int capacity = _session != null ? _session.Tray.Capacity : 1;
             var offset = new Vector3((slot - (capacity - 1) * 0.5f) * slotSpacing, 0f, 0f);
             return RootPoint(trayRoot, offset);
+        }
+
+        private void Update()
+        {
+            if (_riderCount == 0 || _belt == null)
+                return;
+
+            float dt = Time.deltaTime;
+            float speed = LapSeconds > 0f ? _belt.Length / LapSeconds : float.MaxValue;
+            for (int i = 0; i < _riderCount; i++)
+            {
+                ref Rider r = ref _riders[i];
+
+                // Glide one position per tick; never lag more than one position behind the model.
+                r.display = Mathf.Min(r.target, r.display + speed * dt);
+                if (r.display < r.target - 1f)
+                    r.display = r.target - 1f;
+
+                Vector3 world = _belt.PositionToWorld(r.display);
+                if (r.blend < 1f)
+                {
+                    r.blend = Mathf.Min(1f, r.blend + dt / EnterBlendSeconds);
+                    world = Vector3.LerpUnclamped(r.blendFrom, world, r.blend);
+                }
+
+                r.view.SnapTo(world);
+            }
         }
 
         private Vector3 RootPoint(Transform root, Vector3 offset)
@@ -227,6 +354,52 @@ namespace PixelFlow.View
             return view;
         }
 
+        private float BeltTankScale => _belt != null ? _belt.TrackWidth * BeltTankFill : 1f;
+
+        private void ShowSlotFrames(int count)
+        {
+            if (slotFramePrefab == null)
+                return;
+
+            if (_frameProps == null)
+                _frameProps = new MaterialPropertyBlock();
+            _frameProps.SetColor(BaseColorId, slotFrameColor);
+
+            // Frames are created at level load only, when a level has more slots than any before it.
+            while (_slotFrames.Count < count)
+            {
+                Transform frame = Instantiate(slotFramePrefab, transform);
+                if (frame.TryGetComponent(out Renderer renderer))
+                    renderer.SetPropertyBlock(_frameProps);
+                _slotFrames.Add(frame);
+            }
+
+            for (int i = 0; i < _slotFrames.Count; i++)
+            {
+                bool shown = i < count;
+                Transform frame = _slotFrames[i];
+                frame.gameObject.SetActive(shown);
+                if (shown)
+                    frame.position = SlotPosition(i) + new Vector3(0f, 0f, SlotFrameDepth);
+            }
+        }
+
+        private void UpdateCounter()
+        {
+            BeltModel belt = _session.Belt;
+            _belt.SetCounter(belt.Count + belt.QueuedCount, belt.Capacity);
+        }
+
+        private int FindRider(ColorTankModel tank)
+        {
+            for (int i = 0; i < _riderCount; i++)
+            {
+                if (_riders[i].tank == tank)
+                    return i;
+            }
+            return -1;
+        }
+
         private void HandleLaneChanged(int lane)
         {
             IReadOnlyList<ColorTankModel> tanks = _session.Supply.GetLane(lane);
@@ -240,24 +413,98 @@ namespace PixelFlow.View
         private void HandleTankAdded(ColorTankModel tank, int slot)
         {
             if (_views.TryGetValue(tank.Id, out ColorTankView view))
+            {
+                view.SetScale(1f);
                 view.MoveTo(SlotPosition(slot));
+            }
         }
 
         private void HandleTankRemoved(ColorTankModel tank, int oldIndex)
         {
-            if (_views.TryGetValue(tank.Id, out ColorTankView view))
-            {
-                _views.Remove(tank.Id);
-                _depleting.Add(view);
-                view.PlayDeplete(_onDepleteFinished);
-            }
+            // A slot tank leaves its slot when it is relaunched (the belt events move it on). Slot tanks do not fire,
+            // but a depleted one is still shrunk away for safety.
+            if (tank.IsDepleted)
+                StartDeplete(tank);
 
-            SlotQueueManager tray = _session.Tray;
-            for (int slot = oldIndex; slot < tray.Count; slot++)
+            SlotQueueManager slots = _session.Tray;
+            for (int slot = oldIndex; slot < slots.Count; slot++)
             {
-                if (_views.TryGetValue(tray[slot].Id, out ColorTankView shifted))
+                if (_views.TryGetValue(slots[slot].Id, out ColorTankView shifted))
                     shifted.MoveTo(SlotPosition(slot));
             }
+        }
+
+        private void HandleTankQueued(ColorTankModel tank)
+        {
+            _queued.Add(tank);
+            if (_views.TryGetValue(tank.Id, out ColorTankView view))
+            {
+                view.SetScale(BeltTankScale);
+                view.MoveTo(_belt.EntrancePosition(_queued.Count - 1));
+            }
+
+            UpdateCounter();
+        }
+
+        private void HandleTankEntered(ColorTankModel tank)
+        {
+            int index = _queued.IndexOf(tank);
+            if (index >= 0)
+                _queued.RemoveAt(index);
+            for (int i = 0; i < _queued.Count; i++)
+            {
+                if (_views.TryGetValue(_queued[i].Id, out ColorTankView waiting))
+                    waiting.MoveTo(_belt.EntrancePosition(i));
+            }
+
+            if (_views.TryGetValue(tank.Id, out ColorTankView view) && _riderCount < _riders.Length)
+            {
+                _riders[_riderCount++] = new Rider
+                {
+                    tank = tank,
+                    view = view,
+                    target = 0,
+                    display = -0.5f, // the entrance corner, half a position before position 0
+                    blendFrom = view.transform.position,
+                    blend = 0f,
+                };
+            }
+
+            UpdateCounter();
+        }
+
+        private void HandleTankMoved(ColorTankModel tank, int position)
+        {
+            int rider = FindRider(tank);
+            if (rider >= 0)
+                _riders[rider].target = position;
+        }
+
+        private void HandleTankLeft(ColorTankModel tank, bool lapCompleted)
+        {
+            int rider = FindRider(tank);
+            if (rider >= 0)
+            {
+                _riderCount--;
+                _riders[rider] = _riders[_riderCount];
+                _riders[_riderCount] = default;
+            }
+
+            // A lap-completed tank is moved by the waiting-slot event that follows; a depleted one shrinks in place.
+            if (!lapCompleted)
+                StartDeplete(tank);
+
+            UpdateCounter();
+        }
+
+        private void StartDeplete(ColorTankModel tank)
+        {
+            if (!_views.TryGetValue(tank.Id, out ColorTankView view))
+                return;
+
+            _views.Remove(tank.Id);
+            _depleting.Add(view);
+            view.PlayDeplete(_onDepleteFinished);
         }
 
         private void HandleDepleteFinished(ColorTankView view)
@@ -279,6 +526,10 @@ namespace PixelFlow.View
             _session.Supply.OnLaneChanged -= _onLaneChanged;
             _session.Tray.OnTankAdded -= _onTankAdded;
             _session.Tray.OnTankRemoved -= _onTankRemoved;
+            _session.Belt.OnTankQueued -= _onTankQueued;
+            _session.Belt.OnTankEntered -= _onTankEntered;
+            _session.Belt.OnTankMoved -= _onTankMoved;
+            _session.Belt.OnTankLeft -= _onTankLeft;
         }
 
         private void EnsureInitialised()
@@ -289,6 +540,10 @@ namespace PixelFlow.View
             _onLaneChanged = HandleLaneChanged;
             _onTankAdded = HandleTankAdded;
             _onTankRemoved = HandleTankRemoved;
+            _onTankQueued = HandleTankQueued;
+            _onTankEntered = HandleTankEntered;
+            _onTankMoved = HandleTankMoved;
+            _onTankLeft = HandleTankLeft;
             _onDepleteFinished = HandleDepleteFinished;
 
             _pool = new ObjectPool<ColorTankView>(

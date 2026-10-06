@@ -15,7 +15,7 @@ using UnityEngine.UI;
 namespace PixelFlow.EditorTools
 {
     /// <summary>
-    /// Generates the playable game: view materials, the PixelCell / ColorTank / Projectile / Debris prefabs and
+    /// Generates the playable game: view materials, the PixelCell / ColorTank / SlotFrame / Projectile / Debris prefabs and
     /// <c>Assets/PixelFlow/Scenes/Game.unity</c> with every serialized reference assigned, then puts the scene at
     /// Build Settings index 0. Rerunning overwrites the generated assets in place (asset GUIDs are kept).
     /// </summary>
@@ -47,19 +47,19 @@ namespace PixelFlow.EditorTools
         public const float CameraSize = 10f;
 
         /// <summary>
-        /// World rectangle the board is fitted into (top part of the screen).
+        /// World rectangle the board is fitted into (top part of the screen, inside the belt track).
         /// </summary>
-        public static readonly Rect BoardArea = new Rect(-4.5f, -1f, 9f, 9f);
+        public static readonly Rect BoardArea = new Rect(-4f, -1.2f, 8f, 8f);
 
         /// <summary>
-        /// Centre of the tray slots (below the board).
+        /// Centre of the waiting slots (below the belt and its counter).
         /// </summary>
-        public static readonly Vector3 TrayPosition = new Vector3(0f, -2.6f, 0f);
+        public static readonly Vector3 TrayPosition = new Vector3(0f, -4f, 0f);
 
         /// <summary>
-        /// Front row of the supply lanes (below the tray); later rows extend further down.
+        /// Front row of the supply lanes (below the waiting slots); later rows extend further down.
         /// </summary>
-        public static readonly Vector3 SupplyPosition = new Vector3(0f, -4.6f, 0f);
+        public static readonly Vector3 SupplyPosition = new Vector3(0f, -5.5f, 0f);
 
         private const string TmpSettingsPath = "Assets/TextMesh Pro/Resources/TMP Settings.asset";
 
@@ -110,10 +110,12 @@ namespace PixelFlow.EditorTools
 
             PixelCellView cellPrefab = BuildCellPrefab(cellMaterial);
             ColorTankView tankPrefab = BuildTankPrefab(viewMaterial, font);
+            Transform slotFramePrefab = BuildSlotFramePrefab(viewMaterial);
             Transform projectilePrefab = BuildProjectilePrefab(viewMaterial);
             DebrisFx debrisPrefab = BuildDebrisPrefab(particleMaterial);
 
-            BuildScene(scene, levels, boardMaterial, font, cellPrefab, tankPrefab, projectilePrefab, debrisPrefab);
+            BuildScene(scene, levels, boardMaterial, viewMaterial, font, cellPrefab, tankPrefab, slotFramePrefab,
+                projectilePrefab, debrisPrefab);
             AddSceneToBuildSettings();
             AssetDatabase.SaveAssets();
             Debug.Log($"[PixelFlowSceneBuilder] Built {ScenePath} and prefabs in {PrefabFolder}.");
@@ -195,6 +197,14 @@ namespace PixelFlow.EditorTools
             return SavePrefab<Transform>(go, "Projectile.prefab");
         }
 
+        private static Transform BuildSlotFramePrefab(Material material)
+        {
+            // A flat plate behind the slot tank; no collider, so taps reach the tank in front of it.
+            GameObject go = CreateCube("SlotFrame", material, false);
+            go.transform.localScale = new Vector3(1.05f, 1.05f, 0.05f);
+            return SavePrefab<Transform>(go, "SlotFrame.prefab");
+        }
+
         private static ColorTankView BuildTankPrefab(Material material, TMP_FontAsset font)
         {
             GameObject go = CreateCube("ColorTank", material, true);
@@ -257,8 +267,9 @@ namespace PixelFlow.EditorTools
             return SavePrefab<DebrisFx>(go, "Debris.prefab");
         }
 
-        private static void BuildScene(Scene scene, LevelData[] levelAssets, Material boardMaterial, TMP_FontAsset font,
-            PixelCellView cellPrefab, ColorTankView tankPrefab, Transform projectilePrefab, DebrisFx debrisPrefab)
+        private static void BuildScene(Scene scene, LevelData[] levelAssets, Material boardMaterial, Material viewMaterial,
+            TMP_FontAsset font, PixelCellView cellPrefab, ColorTankView tankPrefab, Transform slotFramePrefab,
+            Transform projectilePrefab, DebrisFx debrisPrefab)
         {
             // Camera: orthographic portrait view of the XY plane, looking down +Z.
             var camGo = new GameObject("Main Camera") { tag = "MainCamera" };
@@ -280,7 +291,34 @@ namespace PixelFlow.EditorTools
             gridSo.FindProperty("material").objectReferenceValue = boardMaterial;
             gridSo.ApplyModifiedPropertiesWithoutUndo();
 
-            // Tanks: supply lanes + tray.
+            // Belt: track mesh (track + chevron sub-meshes) and the "used/capacity" counter.
+            var beltGo = new GameObject("Belt");
+            var trackGo = new GameObject("Track");
+            trackGo.transform.SetParent(beltGo.transform, false);
+            var trackFilter = trackGo.AddComponent<MeshFilter>();
+            var trackRenderer = trackGo.AddComponent<MeshRenderer>();
+            trackRenderer.sharedMaterials = new[] { viewMaterial, viewMaterial };
+            trackRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            trackRenderer.receiveShadows = false;
+            var counterGo = new GameObject("Counter");
+            counterGo.transform.SetParent(beltGo.transform, false);
+            var counter = counterGo.AddComponent<TextMeshPro>();
+            counter.font = font;
+            counter.text = "0/5";
+            counter.fontSize = 6f;
+            counter.fontStyle = FontStyles.Bold;
+            counter.alignment = TextAlignmentOptions.Center;
+            counter.color = Color.white;
+            counter.textWrappingMode = TextWrappingModes.NoWrap;
+            counter.rectTransform.sizeDelta = new Vector2(2f, 0.8f);
+            var belt = beltGo.AddComponent<BeltView>();
+            var beltSo = new SerializedObject(belt);
+            beltSo.FindProperty("trackRenderer").objectReferenceValue = trackRenderer;
+            beltSo.FindProperty("trackFilter").objectReferenceValue = trackFilter;
+            beltSo.FindProperty("counterText").objectReferenceValue = counter;
+            beltSo.ApplyModifiedPropertiesWithoutUndo();
+
+            // Tanks: supply lanes, belt tanks and waiting slots.
             var tanksGo = new GameObject("Tanks");
             var trayRoot = new GameObject("TrayRoot").transform;
             trayRoot.SetParent(tanksGo.transform, false);
@@ -293,6 +331,7 @@ namespace PixelFlow.EditorTools
             tankSo.FindProperty("tankPrefab").objectReferenceValue = tankPrefab;
             tankSo.FindProperty("supplyRoot").objectReferenceValue = supplyRoot;
             tankSo.FindProperty("trayRoot").objectReferenceValue = trayRoot;
+            tankSo.FindProperty("slotFramePrefab").objectReferenceValue = slotFramePrefab;
             tankSo.ApplyModifiedPropertiesWithoutUndo();
 
             // Projectiles.
@@ -327,7 +366,8 @@ namespace PixelFlow.EditorTools
             ctrlSo.FindProperty("hud").objectReferenceValue = hud;
             ctrlSo.FindProperty("cam").objectReferenceValue = cam;
             ctrlSo.FindProperty("boardArea").rectValue = BoardArea;
-            ctrlSo.FindProperty("fireInterval").floatValue = 0.06f;
+            ctrlSo.FindProperty("beltView").objectReferenceValue = belt;
+            ctrlSo.FindProperty("lapSeconds").floatValue = 4f;
             ctrlSo.FindProperty("destroysPerFrame").intValue = 64;
             ctrlSo.ApplyModifiedPropertiesWithoutUndo();
 

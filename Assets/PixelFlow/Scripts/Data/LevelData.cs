@@ -45,7 +45,7 @@ namespace PixelFlow.Data
         public int laneCount = 3;
 
         /// <summary>
-        /// Number of slots in the player's tray.
+        /// Number of waiting slots; also the belt capacity (tanks on the belt plus its entrance queue).
         /// </summary>
         public int slotCount = 5;
 

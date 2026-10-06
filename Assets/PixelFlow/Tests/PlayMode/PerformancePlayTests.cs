@@ -73,7 +73,7 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
-        /// Plays the 64x64 sun level (the last level) with the tray kept busy, warms up (at least 60 frames and one complete
+        /// Plays the 64x64 sun level (the last level) with the belt kept busy, warms up (at least 60 frames and one complete
         /// tank depletion), then samples 240 frames while shooting, with game time fixed at 1/60 s per frame:
         /// <list type="bullet">
         /// <item>GC allocation: the profiler hierarchy (main thread, "PlayerLoop" subtree, i.e. the Hierarchy view's
@@ -86,7 +86,6 @@ namespace PixelFlow.Tests
         /// </list>
         /// </summary>
         [UnityTest]
-        [Ignore("Re-enabled in conveyor Task 5")]
         public IEnumerator SteadyStateShooting_NoGCAllocPerFrame_AndFrameBudget()
         {
 #if UNITY_EDITOR
@@ -126,13 +125,21 @@ namespace PixelFlow.Tests
             ProfilerDriver.enabled = true;
 #endif
 
-            // Warm-up: at least 60 frames and one complete tank depletion (removal from the tray and its shrink
-            // animation), so every gameplay code path has run once. The first run of a path may allocate one-off
-            // runtime data (e.g. Mono creates a MethodInfo on the first Delegate.Remove of a handler).
+            // Warm-up: at least 60 frames, one complete tank depletion (removal from the belt and its shrink
+            // animation) and one lap completion into a waiting slot, so every gameplay code path has run once. The
+            // first run of a path may allocate one-off runtime data (e.g. Mono creates a MethodInfo on the first
+            // Delegate.Remove of a handler).
             int tanksAtStart = TanksLeft(controller.Session);
             int framesSinceDepletion = -1;
-            for (int i = 0; i < MaxWarmupFrames && (i < WarmupFrames || framesSinceDepletion < DepletionSettleFrames); i++)
+            int framesSinceLap = -1;
+            for (int i = 0; i < MaxWarmupFrames &&
+                 (i < WarmupFrames || framesSinceDepletion < DepletionSettleFrames || framesSinceLap < DepletionSettleFrames); i++)
             {
+                // Checked before feeding: a tank that has just lapped into a slot may be relaunched right away.
+                if (framesSinceLap >= 0)
+                    framesSinceLap++;
+                else if (controller.Session.Tray.Count > 0)
+                    framesSinceLap = 0;
                 FeedTray(controller);
                 if (framesSinceDepletion >= 0)
                     framesSinceDepletion++;
@@ -141,6 +148,7 @@ namespace PixelFlow.Tests
                 yield return null;
             }
             Assert.GreaterOrEqual(framesSinceDepletion, DepletionSettleFrames, "No tank depleted during warm-up.");
+            Assert.GreaterOrEqual(framesSinceLap, DepletionSettleFrames, "No tank finished a lap during warm-up.");
 
 #if UNITY_EDITOR
             int firstProfiledFrame = ProfilerDriver.lastFrameIndex + 1;
@@ -156,10 +164,10 @@ namespace PixelFlow.Tests
             for (int frame = 0; frame < SampleFrames && controller.State == GameState.Playing; frame++)
             {
                 FeedTray(controller);
-                bool shooting = controller.Session.Shooting.CanAnyTankFire() || controller.ActiveProjectiles > 0;
+                bool shooting = controller.Session.Belt.Count > 0 || controller.ActiveProjectiles > 0;
                 yield return null;
 
-                // LastValue = the frame that just completed (the one in which the tray above was shooting).
+                // LastValue = the frame that just completed (the one in which the belt above was shooting).
                 if (!shooting)
                     continue;
 
@@ -393,13 +401,13 @@ namespace PixelFlow.Tests
 
         private static int TanksLeft(LevelSession s)
         {
-            return s.Supply.TotalRemaining + s.Tray.Count;
+            return s.Supply.TotalRemaining + s.Tray.Count + s.Belt.Count + s.Belt.QueuedCount;
         }
 
         /// <summary>
-        /// Keeps the tray busy: moves the lowest-id lane-front tank whose colour is exposed into the tray, or any
-        /// lane-front tank when nothing in the tray can fire. Runs inside the <see cref="FeedTrayMarkerName"/>
-        /// profiler marker so its allocations count as game code.
+        /// Keeps the belt busy with the <c>AutoPlayer</c> policy: if the belt has room, relaunches the first
+        /// waiting-slot tank whose colour has a front, otherwise launches the lane-front tank with the smallest id.
+        /// Runs inside the <see cref="FeedTrayMarkerName"/> profiler marker so its allocations count as game code.
         /// </summary>
         private static void FeedTray(GameController controller)
         {
@@ -410,25 +418,32 @@ namespace PixelFlow.Tests
         private static void FeedTrayCore(GameController controller)
         {
             LevelSession s = controller.Session;
-            if (s.Tray.IsFull)
+            if (s.Belt.IsFull)
                 return;
 
-            bool anyCanFire = s.Shooting.CanAnyTankFire();
+            for (int slot = 0; slot < s.Tray.Count; slot++)
+            {
+                if (s.Grid.HasAnyFront(s.Tray[slot].ColorId))
+                {
+                    controller.TryLaunchFromSlot(slot);
+                    return;
+                }
+            }
+
             int best = -1;
             int bestId = int.MaxValue;
             for (int lane = 0; lane < s.Supply.LaneCount; lane++)
             {
                 ColorTankModel front = s.Supply.PeekFront(lane);
-                if (front == null || front.Id >= bestId)
-                    continue;
-                if (anyCanFire && !s.Grid.HasExposed(front.ColorId))
-                    continue;
-                bestId = front.Id;
-                best = lane;
+                if (front != null && front.Id < bestId)
+                {
+                    bestId = front.Id;
+                    best = lane;
+                }
             }
 
             if (best >= 0)
-                controller.TryActivateLane(best);
+                controller.TryLaunchFromLane(best);
         }
     }
 }

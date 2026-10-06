@@ -13,22 +13,23 @@ namespace PixelFlow.Controller
 {
     /// <summary>
     /// Wires the Core model to the View layer and drives one level at a time:
-    /// tap input moves lane-front tanks into the tray, a fixed-interval timer runs
-    /// <see cref="ShootingLogic.Step"/>, every shot becomes a projectile, arrivals are queued and destroyed
-    /// under a per-frame budget, and the game ends (HUD popup) once the rules report Won/Lost and nothing
-    /// is still in flight. Nothing is instantiated or allocated per frame; all handlers are cached delegates.
+    /// tapping a lane-front or waiting-slot tank launches it onto the conveyor belt, a belt timer runs
+    /// <see cref="BeltShootingLogic.Tick"/> every <c>lapSeconds / L</c> seconds (one lap takes <c>lapSeconds</c> on
+    /// every board size), every shot becomes a projectile, arrivals are queued and destroyed under a per-frame
+    /// budget, and the game ends (HUD popup) once the belt rules report Won/Lost and nothing is still in flight.
+    /// Nothing is instantiated or allocated per frame; all handlers are cached delegates.
     /// </summary>
     public sealed class GameController : MonoBehaviour
     {
         /// <summary>
-        /// Upper bound of shooting steps run in one frame when the frame time exceeds several fire intervals.
+        /// Upper bound of belt ticks run in one frame when the frame time exceeds several tick intervals.
         /// </summary>
-        public const int MaxFireStepsPerFrame = 8;
+        public const int MaxTicksPerFrame = 16;
 
         private const int CellPoolPrewarm = 128;
         private const int DestroyQueueCapacity = 256;
         private const float RaycastDistance = 100f;
-        private const float MinFireInterval = 0.001f;
+        private const float MinLapSeconds = 0.5f;
 
         /// <summary>
         /// One arrived projectile waiting for its cell to be destroyed.
@@ -45,8 +46,11 @@ namespace PixelFlow.Controller
         [Tooltip("Instanced board renderer.")]
         [SerializeField] private PixelGridRenderer gridRenderer;
 
-        [Tooltip("Supply lanes + tray presentation.")]
+        [Tooltip("Supply lanes, belt tanks and waiting slots presentation.")]
         [SerializeField] private TankBoardView tankBoard;
+
+        [Tooltip("Conveyor belt track and counter.")]
+        [SerializeField] private BeltView beltView;
 
         [Tooltip("Pooled projectile system.")]
         [SerializeField] private ProjectileSystem projectiles;
@@ -64,11 +68,11 @@ namespace PixelFlow.Controller
         [SerializeField] private Camera cam;
 
         [Tooltip("World-space rectangle (XY plane) the board is fitted into.")]
-        [SerializeField] private Rect boardArea = new Rect(-4.5f, -1f, 9f, 9f);
+        [SerializeField] private Rect boardArea = new Rect(-4f, -1.2f, 8f, 8f);
 
-        [Tooltip("Seconds between two shooting steps.")]
-        [Min(MinFireInterval)]
-        [SerializeField] private float fireInterval = 0.06f;
+        [Tooltip("Seconds one belt lap takes on every board size; the tick interval is lapSeconds / belt length.")]
+        [Min(MinLapSeconds)]
+        [SerializeField] private float lapSeconds = 4f;
 
         [Tooltip("Maximum number of cells destroyed per frame.")]
         [Min(1)]
@@ -88,7 +92,8 @@ namespace PixelFlow.Controller
         private LevelSession _session;
         private LevelData _currentData;
         private BoardLayout _layout;
-        private float _fireTimer;
+        private float _tickTimer;
+        private float _tickInterval;
         private int _currentIndex;
         private readonly Stopwatch _loadWatch = new Stopwatch();
 
@@ -139,7 +144,7 @@ namespace PixelFlow.Controller
             Application.targetFrameRate = 60;
 
             // [Min] only guards the inspector; also clamp values set by other means (e.g. scripts, YAML).
-            fireInterval = Mathf.Max(fireInterval, MinFireInterval);
+            lapSeconds = Mathf.Max(lapSeconds, MinLapSeconds);
             destroysPerFrame = Mathf.Max(destroysPerFrame, 1);
 
             _onArrived = HandleArrived;
@@ -184,11 +189,13 @@ namespace PixelFlow.Controller
             }
             if (tankBoard != null)
                 tankBoard.Clear();
+            if (beltView != null)
+                beltView.Clear();
         }
 
         /// <summary>
         /// Loads <c>levels[index]</c>: creates a fresh <see cref="LevelSession"/> (validating the data) first, then
-        /// clears projectiles, pending destroys, tank views and the board, fits and builds the board and tanks,
+        /// clears projectiles, pending destroys, tank views, the belt and the board, fits and builds the board, belt and tanks,
         /// resets the HUD and sets <see cref="State"/> to <see cref="GameState.Playing"/>. The load time is logged.
         /// If the level data is invalid nothing changes: the previous level stays loaded and playable.
         /// </summary>
@@ -236,16 +243,21 @@ namespace PixelFlow.Controller
             if (debris != null)
                 debris.ClearParticles();
             tankBoard.Clear();
+            beltView.Clear();
             gridRenderer.Clear();
 
             _currentData = data;
             _session = session;
             _layout = BoardLayout.Fit(_session.Width, _session.Height, boardArea);
+            var path = new BeltPath(_session.Width, _session.Height);
+            _tickInterval = lapSeconds / path.Length;
             gridRenderer.Build(_session.Grid, _session.Palette, _layout);
-            tankBoard.Build(_session);
+            beltView.Build(path, _layout);
+            tankBoard.LapSeconds = lapSeconds;
+            tankBoard.Build(_session, beltView);
             hud.SetLevel(_currentIndex + 1);
             hud.HideAll();
-            _fireTimer = 0f;
+            _tickTimer = 0f;
             State = GameState.Playing;
 
             _loadWatch.Stop();
@@ -255,22 +267,42 @@ namespace PixelFlow.Controller
         }
 
         /// <summary>
-        /// Moves the front tank of <paramref name="lane"/> into the tray. This is what a tap on a lane-front
-        /// tank does once the raycast has resolved the lane.
+        /// Launches the front tank of <paramref name="lane"/> onto the belt (entrance queue). This is what a tap on
+        /// a lane-front tank does once the raycast has resolved the lane. The belt capacity is checked before the
+        /// tank leaves its lane, so a rejected launch changes nothing.
         /// </summary>
         /// <param name="lane">Supply lane index.</param>
-        /// <returns>False if the game is not playing, the lane is invalid or empty, or the tray is full.</returns>
-        public bool TryActivateLane(int lane)
+        /// <returns>False if the game is not playing, the lane is invalid or empty, or the belt is full.</returns>
+        public bool TryLaunchFromLane(int lane)
         {
             if (State != GameState.Playing || _session == null)
                 return false;
             if (lane < 0 || lane >= _session.Supply.LaneCount)
                 return false;
-            if (_session.Tray.IsFull || _session.Supply.PeekFront(lane) == null)
+            if (_session.Belt.IsFull || _session.Supply.PeekFront(lane) == null)
                 return false;
 
             _session.Supply.TryTakeFront(lane, out ColorTankModel tank);
-            return _session.Tray.TryAdd(tank);
+            return _session.Belt.TryLaunch(tank);
+        }
+
+        /// <summary>
+        /// Relaunches the tank in waiting slot <paramref name="slot"/> onto the belt (entrance queue); the tanks
+        /// after it shift one slot left. This is what a tap on a waiting-slot tank does. The belt capacity is
+        /// checked before the tank leaves its slot, so a rejected launch changes nothing.
+        /// </summary>
+        /// <param name="slot">Waiting slot index (0 = leftmost).</param>
+        /// <returns>False if the game is not playing, the slot is empty or invalid, or the belt is full.</returns>
+        public bool TryLaunchFromSlot(int slot)
+        {
+            if (State != GameState.Playing || _session == null)
+                return false;
+            if (slot < 0 || slot >= _session.Tray.Count || _session.Belt.IsFull)
+                return false;
+
+            ColorTankModel tank = _session.Tray[slot];
+            _session.Tray.TryRemove(tank);
+            return _session.Belt.TryLaunch(tank);
         }
 
         private void Update()
@@ -279,10 +311,11 @@ namespace PixelFlow.Controller
                 return;
 
             HandleInput();
-            RunFireTimer(Time.deltaTime);
+            RunBeltTimer(Time.deltaTime);
             _destroyQueue.Process(destroysPerFrame, _handleDestroy);
 
-            GameState rules = GameRules.Evaluate(_session.Grid, _session.Tray, _session.Supply, _session.Shooting);
+            GameState rules = GameRules.Evaluate(_session.Grid, _session.Belt, _session.Tray, _session.Supply,
+                _session.BeltShooting);
             if (rules != GameState.Playing && projectiles.ActiveCount == 0 && _destroyQueue.Count == 0 &&
                 _activeCells.Count == 0)
             {
@@ -303,38 +336,48 @@ namespace PixelFlow.Controller
             Ray ray = cam.ScreenPointToRay(pointer.position.ReadValue());
             if (!Physics.Raycast(ray, out RaycastHit hit, RaycastDistance))
                 return;
-            if (!tankBoard.TryGetTank(hit.collider, out ColorTankModel tank))
+            if (!tankBoard.TryGetTank(hit.collider, out ColorTankModel tank, out TankLocation where))
                 return;
 
-            int lane = _session.Supply.FindLaneWithFront(tank);
-            if (lane >= 0)
-                TryActivateLane(lane);
+            if (where == TankLocation.LaneFront)
+            {
+                int lane = _session.Supply.FindLaneWithFront(tank);
+                if (lane >= 0)
+                    TryLaunchFromLane(lane);
+            }
+            else if (where == TankLocation.Slot)
+            {
+                int slot = _session.Tray.IndexOf(tank);
+                if (slot >= 0)
+                    TryLaunchFromSlot(slot);
+            }
         }
 
-        private void RunFireTimer(float deltaTime)
+        private void RunBeltTimer(float deltaTime)
         {
-            _fireTimer += deltaTime;
-            int steps = 0;
-            while (_fireTimer >= fireInterval && steps < MaxFireStepsPerFrame)
+            _tickTimer += deltaTime;
+            int ticks = 0;
+            while (_tickTimer >= _tickInterval && ticks < MaxTicksPerFrame)
             {
-                _fireTimer -= fireInterval;
-                steps++;
-                Fire();
+                _tickTimer -= _tickInterval;
+                ticks++;
+                Tick();
             }
 
-            if (steps == MaxFireStepsPerFrame && _fireTimer > fireInterval)
-                _fireTimer = 0f; // drop the backlog after a long frame instead of catching up forever
+            if (ticks == MaxTicksPerFrame && _tickTimer > _tickInterval)
+                _tickTimer = 0f; // drop the backlog after a long frame instead of catching up forever
         }
 
-        private void Fire()
+        private void Tick()
         {
             _shots.Clear();
-            _session.Shooting.Step(_shots);
+            _session.BeltShooting.Tick(_shots);
             Color32[] palette = _session.Palette;
             for (int i = 0; i < _shots.Count; i++)
             {
                 ShotEvent shot = _shots[i];
-                projectiles.Launch(tankBoard.GetMuzzle(shot.Tank), _layout.CellToWorld(shot.Cell), shot.Cell,
+                // The tank fired from shot.BeltPosition; it may already have advanced, lapped into a slot or depleted.
+                projectiles.Launch(beltView.PositionToWorld(shot.BeltPosition), _layout.CellToWorld(shot.Cell), shot.Cell,
                     palette[shot.ColorId]);
             }
         }

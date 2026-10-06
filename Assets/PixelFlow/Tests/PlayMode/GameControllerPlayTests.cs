@@ -19,8 +19,10 @@ using UnityEditor.SceneManagement;
 namespace PixelFlow.Tests
 {
     /// <summary>
-    /// End-to-end tests of the generated Game scene: auto-play to a win (starter level 1 and the sun level), cycling
-    /// through all levels with Next, a forced loss, retry while projectiles are in flight, and the level load time budget.
+    /// End-to-end tests of the generated Game scene under the conveyor-belt rules: auto-play to a win (starter
+    /// level 1 and the sun level), cycling through all levels with Next, an overflow loss, launch capacity, tapping
+    /// lane-front and waiting-slot tanks, retry with tanks on the belt, the level load time budget and a mid-game
+    /// capture of the belt layout.
     /// </summary>
     public sealed class GameControllerPlayTests
     {
@@ -33,12 +35,15 @@ namespace PixelFlow.Tests
         /// <summary>Index of the 64x64 sun level (the last level).</summary>
         private const int SunIndex = 5;
 
+        /// <summary>Index of starter level 3 (16x16), used for the belt layout capture.</summary>
+        private const int Level3Index = 2;
+
         /// <summary>Board size (width = height) of each level in play order.</summary>
         private static readonly int[] LevelSizes = { 8, 12, 16, 24, 32, 64 };
 
         private const string BoardShaderName = "PixelFlow/InstancedColor";
 
-        /// <summary>Seconds to wait after a tap so lane/tray move tweens (0.18 s) have finished.</summary>
+        /// <summary>Seconds to wait after a tap so lane/slot move tweens (0.18 s) have finished.</summary>
         private const float TweenSettleSeconds = 0.3f;
 
         private GameController _controller;
@@ -52,8 +57,8 @@ namespace PixelFlow.Tests
         private InputSettings.EditorInputBehaviorInPlayMode _savedEditorBehavior;
 
         /// <summary>
-        /// Restores the time scale changed by the auto-play test, and removes the touchscreen and restores the
-        /// input settings changed by the tap test.
+        /// Restores the time scale changed by the auto-play tests, and removes the touchscreen and restores the
+        /// input settings changed by the tap tests.
         /// </summary>
         [TearDown]
         public void TearDown()
@@ -76,11 +81,12 @@ namespace PixelFlow.Tests
 
         /// <summary>
         /// Drives the real input path (<c>Pointer.current</c> press, camera raycast, tank lookup, lane-front check)
-        /// with synthesized touches on a test touchscreen: tapping a non-front tank does nothing, tapping the front
-        /// of lane 0 moves that tank into the tray, and once the tray is full a lane-front tap is ignored.
+        /// with synthesized touches: tapping a non-front tank does nothing, tapping the front of lane 0 launches that
+        /// tank onto the belt, and once the belt plus its entrance queue holds <c>slotCount</c> tanks a lane-front
+        /// tap is ignored and the tank stays in its lane.
         /// </summary>
         [UnityTest]
-        public IEnumerator Tap_LaneFront_MovesTankToTray_NonFrontAndFullTrayIgnored()
+        public IEnumerator Tap_LaneFront_LaunchesOntoBelt()
         {
             yield return LoadGameScene();
             LevelData level = CreateTapLevel();
@@ -96,62 +102,133 @@ namespace PixelFlow.Tests
             // Non-front tank (lane 1, row 1): ignored.
             ColorTankModel lane1Front = s.Supply.PeekFront(1);
             yield return Tap(cam, board.LanePosition(1, 1));
-            Assert.AreEqual(0, s.Tray.Count, "Tapping a non-front tank moved a tank into the tray.");
+            Assert.AreEqual(0, OnBelt(s), "Tapping a non-front tank launched a tank.");
             Assert.AreEqual(8, s.Supply.TotalRemaining);
             Assert.AreSame(lane1Front, s.Supply.PeekFront(1));
 
-            // Front of lane 0: moves into slot 0.
+            // Front of lane 0: launched onto the belt (entrance queue or belt).
             ColorTankModel lane0Front = s.Supply.PeekFront(0);
             yield return Tap(cam, board.LanePosition(0, 0));
-            Assert.AreEqual(1, s.Tray.Count, "Tapping the lane-0 front tank did not move it into the tray.");
-            Assert.AreSame(lane0Front, s.Tray[0]);
+            Assert.AreEqual(1, OnBelt(s), "Tapping the lane-0 front tank did not launch it.");
             Assert.AreEqual(7, s.Supply.TotalRemaining);
+            Assert.AreNotSame(lane0Front, s.Supply.PeekFront(0));
             yield return new WaitForSeconds(TweenSettleSeconds);
 
-            // Fill the tray by tapping lane fronts (alternating lanes so both stay non-empty).
+            // Fill the belt by tapping lane fronts (alternating lanes so both stay non-empty).
             for (int i = 1; i < 5; i++)
             {
                 int lane = i % 2;
                 yield return Tap(cam, board.LanePosition(lane, 0));
-                Assert.AreEqual(i + 1, s.Tray.Count, $"Tap {i} on lane {lane} front did not add a tank.");
+                Assert.AreEqual(i + 1, OnBelt(s), $"Tap {i} on lane {lane} front did not launch a tank.");
                 yield return new WaitForSeconds(TweenSettleSeconds);
             }
-            Assert.IsTrue(s.Tray.IsFull);
-            Assert.AreEqual(GameState.Playing, _controller.State, "Tray tanks must still be able to fire.");
+            Assert.IsTrue(s.Belt.IsFull);
+            Assert.AreEqual(GameState.Playing, _controller.State);
 
-            // Tray full: a lane-front tap is ignored and the tank stays in its lane.
+            // Belt full: a lane-front tap is ignored and the tank stays in its lane.
             ColorTankModel front = s.Supply.PeekFront(1);
             Assert.IsNotNull(front);
             yield return Tap(cam, board.LanePosition(1, 0));
-            Assert.AreEqual(5, s.Tray.Count);
-            Assert.AreEqual(3, s.Supply.TotalRemaining, "A tank left its lane while the tray was full.");
+            Assert.AreEqual(5, OnBelt(s));
+            Assert.AreEqual(3, s.Supply.TotalRemaining, "A tank left its lane while the belt was full.");
             Assert.AreSame(front, s.Supply.PeekFront(1));
 
             Object.Destroy(level);
         }
 
         /// <summary>
-        /// A tank that has just entered the tray (its view still tweening away from the lane) reports its muzzle at
-        /// its tray slot, so a shot fired in that frame starts from the slot rather than from the supply lane.
+        /// A tank that finished its lap waits in slot 0; a synthesized tap on it removes it from the slot and
+        /// launches it onto the belt again.
         /// </summary>
         [UnityTest]
-        public IEnumerator TankJustAddedToTray_MuzzleIsAtSlot()
+        public IEnumerator Tap_SlotTank_Relaunches()
         {
             yield return LoadGameScene();
-            LevelData level = CreateTapLevel();
+            LevelData level = CreateOverflowLevel();
             _controller.LoadLevel(level);
             TankBoardView board = Object.FindFirstObjectByType<TankBoardView>();
+            Camera cam = Camera.main;
+            SetUpTouchscreen();
+            LevelSession s = _controller.Session;
+
+            ColorTankModel tank = s.Supply.PeekFront(0);
+            Assert.IsTrue(_controller.TryLaunchFromLane(0));
+            yield return WaitForSlotCount(s, 1);
+            Assert.AreSame(tank, s.Tray[0]);
             yield return new WaitForSeconds(TweenSettleSeconds);
 
-            ColorTankModel tank = _controller.Session.Supply.PeekFront(0);
-            Vector3 lanePos = board.LanePosition(0, 0);
-            Vector3 muzzleOffset = board.GetMuzzle(tank) - lanePos;
+            yield return Tap(cam, board.SlotPosition(0));
+            Assert.AreEqual(0, s.Tray.Count, "The tapped slot tank is still in its slot.");
+            Assert.AreEqual(1, OnBelt(s), "The tapped slot tank was not launched.");
+            Assert.AreEqual(GameState.Playing, _controller.State);
 
-            Assert.IsTrue(_controller.TryActivateLane(0));
-            Vector3 muzzle = board.GetMuzzle(tank);
-            Vector3 expected = board.SlotPosition(0) + muzzleOffset;
-            Assert.Less(Vector3.Distance(expected, muzzle), 1e-3f, $"Muzzle {muzzle} is not at slot 0 ({expected}).");
-            Assert.Greater(Vector3.Distance(lanePos + muzzleOffset, muzzle), 1f, "Muzzle still at the lane.");
+            Object.Destroy(level);
+        }
+
+        /// <summary>
+        /// With the belt full (capacity 1, one tank riding), launching the waiting-slot tank is rejected and the
+        /// tank stays in its slot.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator TryLaunchFromSlot_BeltFull_ReturnsFalseAndKeepsSlot()
+        {
+            yield return LoadGameScene();
+            LevelData level = CreateOverflowLevel();
+            _controller.LoadLevel(level);
+            LevelSession s = _controller.Session;
+
+            ColorTankModel first = s.Supply.PeekFront(0);
+            Assert.IsTrue(_controller.TryLaunchFromLane(0));
+            Assert.IsFalse(_controller.TryLaunchFromLane(0), "The belt accepted a second tank at capacity 1.");
+            yield return WaitForSlotCount(s, 1);
+
+            Assert.IsTrue(_controller.TryLaunchFromLane(0));
+            Assert.IsTrue(s.Belt.IsFull);
+            Assert.IsFalse(_controller.TryLaunchFromSlot(0), "Slot tank launched onto a full belt.");
+            Assert.AreEqual(1, s.Tray.Count);
+            Assert.AreSame(first, s.Tray[0]);
+            Assert.AreEqual(1, OnBelt(s));
+
+            Object.Destroy(level);
+        }
+
+        /// <summary>
+        /// One waiting slot and two tanks whose colour has no front: the first finishes its lap into the slot, the
+        /// second finishes its lap with every slot full, so the game is lost (overflow) and the lose popup shows;
+        /// retry restores a playable level.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Overflow_ReachesLost()
+        {
+            yield return LoadGameScene();
+            LevelData level = CreateOverflowLevel();
+            _controller.LoadLevel(level);
+            LevelSession s = _controller.Session;
+            Time.timeScale = 4f;
+
+            Assert.IsTrue(_controller.TryLaunchFromLane(0));
+            yield return WaitForSlotCount(s, 1);
+            Assert.AreEqual(GameState.Playing, _controller.State, "Lost before the second tank was launched.");
+            Assert.IsTrue(_controller.TryLaunchFromLane(0));
+
+            float start = Time.realtimeSinceStartup;
+            while (_controller.State == GameState.Playing)
+            {
+                Assert.Less(Time.realtimeSinceStartup - start, 10f, "Lost state not reached.");
+                yield return null;
+            }
+
+            Assert.AreEqual(GameState.Lost, _controller.State);
+            Assert.IsTrue(s.BeltShooting.Overflowed, "The loss was not an overflow.");
+            Assert.IsTrue(Panel("LosePanel").activeSelf, "Lose popup not shown.");
+            Assert.IsFalse(Panel("WinPanel").activeSelf, "Win popup shown on a loss.");
+
+            RetryButton().onClick.Invoke();
+            Assert.AreEqual(GameState.Playing, _controller.State);
+            Assert.IsFalse(Panel("LosePanel").activeSelf, "Lose popup still shown after retry.");
+            Assert.AreEqual(0, _controller.Session.Tray.Count);
+            Assert.AreEqual(0, OnBelt(_controller.Session));
+            Assert.AreEqual(2, _controller.Session.Supply.TotalRemaining);
 
             Object.Destroy(level);
         }
@@ -169,8 +246,8 @@ namespace PixelFlow.Tests
             LevelSession before = _controller.Session;
             int views = board.ActiveViewCount;
 
-            LevelData bad = CreateBlockedLevel();
-            bad.cells = new byte[] { 0, 7 }; // colour 7 is outside the 2-colour palette
+            LevelData bad = CreateOverflowLevel();
+            bad.cells[0] = 7; // colour 7 is outside the 2-colour palette
             Assert.Throws<System.ArgumentException>(() => _controller.LoadLevel(bad));
 
             Assert.AreSame(before, _controller.Session, "Session replaced by a failed load.");
@@ -179,11 +256,11 @@ namespace PixelFlow.Tests
             Assert.AreEqual(SunCells, _grid.InstanceCount, "Board cleared by a failed load.");
             Assert.AreEqual(views, board.ActiveViewCount, "Tank views cleared by a failed load.");
 
-            Assert.IsTrue(_controller.TryActivateLane(0), "Previous level no longer playable.");
+            Assert.IsTrue(_controller.TryLaunchFromLane(0), "Previous level no longer playable.");
             float start = Time.realtimeSinceStartup;
             while (_controller.Session.Grid.RemainingCount == SunCells)
             {
-                Assert.Less(Time.realtimeSinceStartup - start, 5f, "No pixel destroyed after the failed load.");
+                Assert.Less(Time.realtimeSinceStartup - start, 6f, "No pixel destroyed after the failed load.");
                 yield return null;
             }
 
@@ -198,13 +275,13 @@ namespace PixelFlow.Tests
         public IEnumerator CellDestroyCube_UsesBoardShader()
         {
             yield return LoadGameScene();
-            Assert.IsTrue(_controller.TryActivateLane(0));
+            Assert.IsTrue(_controller.TryLaunchFromLane(0));
 
             PixelCellView cell = null;
             float start = Time.realtimeSinceStartup;
             while (cell == null)
             {
-                Assert.Less(Time.realtimeSinceStartup - start, 5f, "No destroy animation started.");
+                Assert.Less(Time.realtimeSinceStartup - start, 6f, "No destroy animation started.");
                 yield return null;
                 cell = Object.FindFirstObjectByType<PixelCellView>(FindObjectsInactive.Exclude);
             }
@@ -214,11 +291,10 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
-        /// Starter level 1 (the 8x8 heart, loaded on scene start) is won with the "smallest lane-front id first"
-        /// strategy, and a mid-game capture of the game camera is written to Logs/level1_capture.png.
+        /// Starter level 1 (the 8x8 heart, loaded on scene start) is won with the <c>AutoPlayer</c> policy driven
+        /// through the controller's launch hooks, and a mid-game capture is written to Logs/level1_capture.png.
         /// </summary>
         [UnityTest]
-        [Ignore("Re-enabled in conveyor Task 5")]
         public IEnumerator Level1_AutoPlay_ReachesWon()
         {
             yield return LoadGameScene();
@@ -227,6 +303,7 @@ namespace PixelFlow.Tests
             int cells = _controller.Session.Grid.RemainingCount;
             Assert.AreEqual(CountPixels(_controller.CurrentLevel), cells);
             Assert.Less(cells, 64, "Level 1 should have few pixels.");
+            Time.timeScale = 4f;
 
             float start = Time.realtimeSinceStartup;
             bool captured = false;
@@ -234,10 +311,9 @@ namespace PixelFlow.Tests
             {
                 Assert.Less(Time.realtimeSinceStartup - start, 60f, "Level 1 was not won within 60 s.");
 
-                LevelSession s = _controller.Session;
-                if (!s.Shooting.CanAnyTankFire() && !s.Tray.IsFull)
-                    _controller.TryActivateLane(SmallestFrontLane(s));
+                LaunchLikeAutoPlayer(_controller);
 
+                LevelSession s = _controller.Session;
                 if (!captured && s.Grid.RemainingCount < cells * 3 / 4 && _controller.ActiveProjectiles > 0)
                 {
                     CaptureCamera("level1_capture.png");
@@ -281,11 +357,10 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
-        /// Plays the 64x64 sun level (the last level) with the "smallest lane-front id first" strategy until it is
-        /// won, and writes a mid-game capture of the game camera to Logs/game_capture.png.
+        /// Plays the 64x64 sun level (the last level) with the <c>AutoPlayer</c> policy driven through the
+        /// controller's launch hooks until it is won, and writes a mid-game capture to Logs/game_capture.png.
         /// </summary>
         [UnityTest]
-        [Ignore("Re-enabled in conveyor Task 5")]
         public IEnumerator SunLevel_AutoPlay_ReachesWon()
         {
             yield return LoadGameScene();
@@ -297,12 +372,11 @@ namespace PixelFlow.Tests
             bool captured = false;
             while (_controller.State == GameState.Playing)
             {
-                Assert.Less(Time.realtimeSinceStartup - start, 180f, "The sun level was not won within 180 s.");
+                Assert.Less(Time.realtimeSinceStartup - start, 240f, "The sun level was not won within 240 s.");
+
+                LaunchLikeAutoPlayer(_controller);
 
                 LevelSession s = _controller.Session;
-                if (!s.Shooting.CanAnyTankFire() && !s.Tray.IsFull)
-                    _controller.TryActivateLane(SmallestFrontLane(s));
-
                 if (!captured && s.Grid.RemainingCount < SunCells * 3 / 4 && _controller.ActiveProjectiles > 0)
                 {
                     CaptureCamera("game_capture.png");
@@ -320,75 +394,68 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
-        /// Fills the tray with five tanks whose colour is not exposed: the game must end in a loss with the
-        /// lose popup shown; retry restores a playable level.
+        /// Starter level 3 (16x16) is played with the <c>AutoPlayer</c> policy until a quarter of its pixels are
+        /// gone with at least three tanks on the belt and projectiles in flight; the game camera is then captured to
+        /// Logs/belt_capture.png for a visual check of the belt layout (track, chevrons, counter, slots, lanes).
         /// </summary>
         [UnityTest]
-        public IEnumerator FillTrayWithUnfireableTanks_ReachesLost()
+        public IEnumerator Level3_MidGame_CapturesBelt()
         {
             yield return LoadGameScene();
-            LevelData level = CreateBlockedLevel();
-            _controller.LoadLevel(level);
-
-            for (int i = 0; i < 5; i++)
-                Assert.IsTrue(_controller.TryActivateLane(0), $"Activation {i} failed.");
-            Assert.IsFalse(_controller.TryActivateLane(0), "Tray accepted a sixth tank.");
+            _controller.LoadLevel(Level3Index);
+            int cells = _controller.Session.Grid.RemainingCount;
 
             float start = Time.realtimeSinceStartup;
-            while (_controller.State == GameState.Playing)
+            while (true)
             {
-                Assert.Less(Time.realtimeSinceStartup - start, 5f, "Lost state not reached.");
+                Assert.AreEqual(GameState.Playing, _controller.State, "Level 3 ended before the capture.");
+                Assert.Less(Time.realtimeSinceStartup - start, 60f, "No capture moment within 60 s.");
+
+                LaunchLikeAutoPlayer(_controller);
+
+                LevelSession s = _controller.Session;
+                if (s.Grid.RemainingCount < cells * 3 / 4 && s.Belt.Count >= 3 && _controller.ActiveProjectiles > 0)
+                    break;
+
                 yield return null;
             }
 
-            Assert.AreEqual(GameState.Lost, _controller.State);
-            Assert.IsTrue(Panel("LosePanel").activeSelf, "Lose popup not shown.");
-            Assert.IsFalse(Panel("WinPanel").activeSelf, "Win popup shown on a loss.");
-
-            RetryButton().onClick.Invoke();
-            Assert.AreEqual(GameState.Playing, _controller.State);
-            Assert.IsFalse(Panel("LosePanel").activeSelf, "Lose popup still shown after retry.");
-            Assert.AreEqual(0, _controller.Session.Tray.Count);
-            Assert.AreEqual(6, _controller.Session.Supply.TotalRemaining);
-
-            Object.Destroy(level);
+            CaptureCamera("belt_capture.png");
+            Assert.IsTrue(File.Exists(Path.Combine(Application.dataPath, "..", "Logs", "belt_capture.png")));
         }
 
         /// <summary>
-        /// Retry while projectiles are in flight: no projectile or pending destroy survives, the board is fully
-        /// rebuilt and stays intact (no old projectile hides a new cell).
+        /// Retry while tanks ride the belt and projectiles are in flight: the belt and its queue are empty, only the
+        /// supply tanks have views, no projectile or pending destroy survives and the board is fully rebuilt and
+        /// stays intact (no old projectile hides a new cell).
         /// </summary>
         [UnityTest]
-        public IEnumerator Retry_MidFlight_ClearsProjectilesAndQueue()
+        public IEnumerator Retry_WithTanksOnBelt_ClearsEverything()
         {
             yield return LoadGameScene();
             _controller.LoadLevel(SunIndex);
+            TankBoardView board = Object.FindFirstObjectByType<TankBoardView>();
+            int pixels = CountPixels(_controller.CurrentLevel);
 
             for (int lane = 0; lane < 3; lane++)
-                Assert.IsTrue(_controller.TryActivateLane(lane));
+                Assert.IsTrue(_controller.TryLaunchFromLane(lane));
 
             float start = Time.realtimeSinceStartup;
-            while (_controller.ActiveProjectiles == 0 || _controller.Session.Grid.RemainingCount > SunCells - 20)
+            while (_controller.ActiveProjectiles == 0 || _controller.Session.Belt.Count < 2 ||
+                   _controller.Session.Grid.RemainingCount > SunCells - 20)
             {
-                Assert.Less(Time.realtimeSinceStartup - start, 10f, "No projectiles in flight.");
+                Assert.Less(Time.realtimeSinceStartup - start, 10f, "No projectiles in flight from the belt.");
                 yield return null;
             }
             Assert.Greater(_controller.ActiveProjectiles, 0);
 
             RetryButton().onClick.Invoke();
-
-            Assert.AreEqual(0, _controller.ActiveProjectiles);
-            Assert.AreEqual(0, _controller.PendingDestroys);
-            Assert.AreEqual(SunCells, _grid.InstanceCount);
-            Assert.AreEqual(SunCells, _controller.Session.Grid.RemainingCount);
-            Assert.AreEqual(0, _controller.Session.Tray.Count);
+            AssertFreshSunLevel(board, pixels);
 
             for (int i = 0; i < 30; i++)
                 yield return null;
 
-            Assert.AreEqual(0, _controller.ActiveProjectiles);
-            Assert.AreEqual(0, _controller.PendingDestroys);
-            Assert.AreEqual(SunCells, _controller.Session.Grid.RemainingCount);
+            AssertFreshSunLevel(board, pixels);
             for (int y = 0; y < 64; y++)
             {
                 for (int x = 0; x < 64; x++)
@@ -403,8 +470,8 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
-        /// Levels load (model + board + tanks + HUD) in well under a second: level 1 on scene start, and the 64x64
-        /// sun level both on its first load and on reload.
+        /// Levels load (model + board + belt + tanks + HUD) in well under a second: level 1 on scene start, and the
+        /// 64x64 sun level both on its first load and on reload.
         /// </summary>
         [UnityTest]
         public IEnumerator LevelLoad_Under1000ms()
@@ -422,6 +489,60 @@ namespace PixelFlow.Tests
             Assert.Less(first, 1000.0);
             Assert.Less(reload, 1000.0);
             yield return null;
+        }
+
+        private void AssertFreshSunLevel(TankBoardView board, int pixels)
+        {
+            LevelSession s = _controller.Session;
+            Assert.AreEqual(0, s.Belt.Count, "Tanks left on the belt after retry.");
+            Assert.AreEqual(0, s.Belt.QueuedCount, "Tanks left in the entrance queue after retry.");
+            Assert.AreEqual(0, s.Tray.Count, "Tanks left in the waiting slots after retry.");
+            Assert.AreEqual(s.Supply.TotalRemaining, board.ActiveViewCount, "Tank views other than the supply.");
+            Assert.AreEqual(0, _controller.ActiveProjectiles);
+            Assert.AreEqual(0, _controller.PendingDestroys);
+            Assert.AreEqual(pixels, _grid.InstanceCount);
+            Assert.AreEqual(pixels, s.Grid.RemainingCount);
+        }
+
+        /// <summary>
+        /// One frame of the <c>AutoPlayer</c> policy through the controller hooks: if the belt has room, relaunch
+        /// the first waiting-slot tank whose colour has a front, otherwise launch the lane-front tank with the
+        /// smallest id.
+        /// </summary>
+        private static void LaunchLikeAutoPlayer(GameController controller)
+        {
+            LevelSession s = controller.Session;
+            if (s.Belt.IsFull)
+                return;
+
+            for (int slot = 0; slot < s.Tray.Count; slot++)
+            {
+                if (s.Grid.HasAnyFront(s.Tray[slot].ColorId))
+                {
+                    controller.TryLaunchFromSlot(slot);
+                    return;
+                }
+            }
+
+            int lane = SmallestFrontLane(s);
+            if (lane >= 0)
+                controller.TryLaunchFromLane(lane);
+        }
+
+        private static int OnBelt(LevelSession s)
+        {
+            return s.Belt.Count + s.Belt.QueuedCount;
+        }
+
+        private IEnumerator WaitForSlotCount(LevelSession s, int count)
+        {
+            float start = Time.realtimeSinceStartup;
+            while (s.Tray.Count < count)
+            {
+                Assert.Less(Time.realtimeSinceStartup - start, 10f, $"No tank reached waiting slot {count - 1}.");
+                Assert.AreEqual(GameState.Playing, _controller.State, "Game ended while waiting for a lap.");
+                yield return null;
+            }
         }
 
         private IEnumerator LoadGameScene()
@@ -482,8 +603,8 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
-        /// 20x50 board of colour 0 with two lanes of four long-lived colour-0 tanks (ammo 200 each), so tray tanks
-        /// keep firing (the game stays Playing) while the tap test runs.
+        /// 20x50 board of colour 0 with two lanes of four long-lived colour-0 tanks (ammo 200 each), so belt tanks
+        /// keep riding (the game stays Playing) while the tap test runs.
         /// </summary>
         private static LevelData CreateTapLevel()
         {
@@ -498,6 +619,26 @@ namespace PixelFlow.Tests
                 level.tanks[i] = new ColorTankData { colorId = 0, ammo = 200 };
             level.laneCount = 2;
             level.slotCount = 5;
+            return level;
+        }
+
+        /// <summary>
+        /// 3x3 board of colour 0 with a colour-1 centre (never a front), one waiting slot (belt capacity 1) and one
+        /// lane of two colour-1 tanks: neither can ever fire, so each finishes its lap with ammo left.
+        /// </summary>
+        private static LevelData CreateOverflowLevel()
+        {
+            var level = ScriptableObject.CreateInstance<LevelData>();
+            level.name = "OverflowTestLevel";
+            level.width = 3;
+            level.height = 3;
+            level.palette = new Color32[] { new Color32(220, 60, 60, 255), new Color32(60, 120, 220, 255) };
+            level.cells = new byte[] { 0, 0, 0, 0, 1, 0, 0, 0, 0 };
+            level.tanks = new ColorTankData[2];
+            for (int i = 0; i < level.tanks.Length; i++)
+                level.tanks[i] = new ColorTankData { colorId = 1, ammo = 1 };
+            level.laneCount = 1;
+            level.slotCount = 1;
             return level;
         }
 
@@ -548,27 +689,6 @@ namespace PixelFlow.Tests
                 }
             }
             return best;
-        }
-
-        /// <summary>
-        /// 1x2 board: colour 0 exposed at the bottom, colour 1 above it. One lane holding five colour-1 tanks
-        /// (unable to fire while colour 0 covers the column) followed by a colour-0 tank.
-        /// </summary>
-        private static LevelData CreateBlockedLevel()
-        {
-            var level = ScriptableObject.CreateInstance<LevelData>();
-            level.name = "BlockedTestLevel";
-            level.width = 1;
-            level.height = 2;
-            level.palette = new Color32[] { new Color32(220, 60, 60, 255), new Color32(60, 120, 220, 255) };
-            level.cells = new byte[] { 0, 1 };
-            level.tanks = new ColorTankData[6];
-            for (int i = 0; i < 5; i++)
-                level.tanks[i] = new ColorTankData { colorId = 1, ammo = 1 };
-            level.tanks[5] = new ColorTankData { colorId = 0, ammo = 1 };
-            level.laneCount = 1;
-            level.slotCount = 5;
-            return level;
         }
 
         private void CaptureCamera(string fileName)
