@@ -75,6 +75,37 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
+        /// Overflow is checked before Won: a tank that cleared the last pixel and then overflows the waiting slots
+        /// leaves the game Lost even though no pixels remain.
+        /// </summary>
+        [Test]
+        public void Evaluate_OverflowWithBoardCleared_IsLost()
+        {
+            var tanks = new[]
+            {
+                new ColorTankData { colorId = 0, ammo = 1 },
+                new ColorTankData { colorId = 0, ammo = 2 },
+            };
+            var s = CreateSession(new[] { "0" }, tanks, lanes: 1, slots: 1);
+            s.Supply.TryTakeFront(0, out ColorTankModel parked);
+            s.Tray.TryAdd(parked);
+            s.Supply.TryTakeFront(0, out ColorTankModel rider);
+            s.Belt.TryLaunch(rider);
+            var output = new List<ShotEvent>();
+
+            s.BeltShooting.Tick(output); // admit
+            for (int i = 0; i < new BeltPath(1, 1).Length; i++)
+            {
+                s.BeltShooting.Tick(output); // the first tick clears the only pixel; the last one ends the lap
+            }
+
+            Assert.AreEqual(0, s.Grid.RemainingCount, "The rider cleared the board");
+            Assert.AreEqual(1, rider.Ammo, "The rider finished its lap with ammo left");
+            Assert.IsTrue(s.BeltShooting.Overflowed);
+            Assert.AreEqual(GameState.Lost, Evaluate(s));
+        }
+
+        /// <summary>
         /// The game is Lost when supply, belt and queue are empty and no slot tank's colour is on any front.
         /// </summary>
         [Test]

@@ -81,6 +81,19 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
+        /// BeltModel exposes the path it was built with.
+        /// </summary>
+        [Test]
+        public void Path_IsTheConstructorPath()
+        {
+            var belt = new BeltModel(2, new BeltPath(width: 3, height: 2));
+
+            Assert.AreEqual(3, belt.Path.Width);
+            Assert.AreEqual(2, belt.Path.Height);
+            Assert.AreEqual(10, belt.Path.Length);
+        }
+
+        /// <summary>
         /// Test that BeltModel respects capacity including queued tanks.
         /// </summary>
         [Test]

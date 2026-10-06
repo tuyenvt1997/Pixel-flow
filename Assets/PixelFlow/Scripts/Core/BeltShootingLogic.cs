@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -20,17 +21,32 @@ namespace PixelFlow.Core
         public bool Overflowed { get; private set; }
 
         /// <summary>
+        /// Raised when a tank finishes its lap with ammo left while every waiting slot is full. The tank has
+        /// already left the belt (<see cref="BeltModel.OnTankLeft"/> with <c>lapCompleted = true</c>) and is in no
+        /// container any more; <see cref="Overflowed"/> is already true when this is raised.
+        /// </summary>
+        public event Action<ColorTankModel> OnOverflow;
+
+        /// <summary>
         /// Creates the belt shooting logic.
         /// </summary>
-        /// <param name="grid">The pixel grid the tanks shoot at; its size defines the belt path.</param>
-        /// <param name="belt">The belt holding the riding and queued tanks.</param>
+        /// <param name="grid">The pixel grid the tanks shoot at.</param>
+        /// <param name="belt">The belt holding the riding and queued tanks; its <see cref="BeltModel.Path"/> is used.</param>
         /// <param name="waitingSlots">The waiting slots that receive tanks finishing a lap with ammo left.</param>
+        /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
+        /// <exception cref="ArgumentException">Thrown if the belt path's size does not match the grid's size.</exception>
         public BeltShootingLogic(PixelGridModel grid, BeltModel belt, SlotQueueManager waitingSlots)
         {
-            _grid = grid;
-            _belt = belt;
-            _waitingSlots = waitingSlots;
-            _path = new BeltPath(grid.Width, grid.Height);
+            _grid = grid ?? throw new ArgumentNullException(nameof(grid));
+            _belt = belt ?? throw new ArgumentNullException(nameof(belt));
+            _waitingSlots = waitingSlots ?? throw new ArgumentNullException(nameof(waitingSlots));
+            _path = belt.Path;
+            if (_path.Width != grid.Width || _path.Height != grid.Height)
+            {
+                throw new ArgumentException(
+                    $"Belt path is {_path.Width}x{_path.Height} but the grid is {grid.Width}x{grid.Height}.",
+                    nameof(belt));
+            }
         }
 
         /// <summary>
@@ -76,6 +92,7 @@ namespace PixelFlow.Core
                     if (!_waitingSlots.TryAdd(tank))
                     {
                         Overflowed = true;
+                        OnOverflow?.Invoke(tank);
                     }
 
                     continue;

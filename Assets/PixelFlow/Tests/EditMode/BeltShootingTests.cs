@@ -218,12 +218,20 @@ namespace PixelFlow.Tests
             var s = CreateSession(new[] { "1" }, tanks, lanes: 1, slots: 1);
             s.Supply.TryTakeFront(0, out ColorTankModel parked);
             Assert.IsTrue(s.Tray.TryAdd(parked));
-            LaunchAndAdmit(s);
+            ColorTankModel rider = LaunchAndAdmit(s);
             int lapLength = new BeltPath(1, 1).Length;
+            var overflowed = new List<ColorTankModel>();
+            bool overflowedWhenRaised = false;
+            s.BeltShooting.OnOverflow += t =>
+            {
+                overflowed.Add(t);
+                overflowedWhenRaised = s.BeltShooting.Overflowed;
+            };
 
             for (int tick = 0; tick < lapLength; tick++)
             {
                 Assert.IsFalse(s.BeltShooting.Overflowed);
+                Assert.AreEqual(0, overflowed.Count, "OnOverflow raised before the lap ended");
                 s.BeltShooting.Tick(new List<ShotEvent>());
             }
 
@@ -231,6 +239,45 @@ namespace PixelFlow.Tests
             Assert.AreEqual(0, s.Belt.Count, "Tank left the belt");
             Assert.AreEqual(1, s.Tray.Count);
             Assert.AreSame(parked, s.Tray[0]);
+            Assert.AreEqual(1, overflowed.Count, "OnOverflow raised once");
+            Assert.AreSame(rider, overflowed[0], "OnOverflow carries the overflowed tank");
+            Assert.IsTrue(overflowedWhenRaised, "Overflowed is already true when OnOverflow is raised");
+        }
+
+        /// <summary>
+        /// A tank that finishes its lap into a free waiting slot does not raise OnOverflow.
+        /// </summary>
+        [Test]
+        public void Tick_LapIntoFreeSlot_DoesNotRaiseOnOverflow()
+        {
+            var s = CreateSession(new[] { "1" }, new[] { new ColorTankData { colorId = 0, ammo = 2 } });
+            LaunchAndAdmit(s);
+            int raised = 0;
+            s.BeltShooting.OnOverflow += _ => raised++;
+
+            for (int tick = 0; tick < new BeltPath(1, 1).Length; tick++)
+            {
+                s.BeltShooting.Tick(new List<ShotEvent>());
+            }
+
+            Assert.AreEqual(1, s.Tray.Count, "Tank went to the waiting slot");
+            Assert.AreEqual(0, raised);
+        }
+
+        /// <summary>
+        /// The shooting logic uses the belt's path and rejects a belt whose path does not match the grid's size.
+        /// </summary>
+        [Test]
+        public void Ctor_BeltPathSizeMismatch_Throws()
+        {
+            var grid = new PixelGridModel(3, 2, new byte[6]);
+            var slots = new SlotQueueManager(1);
+
+            Assert.Throws<System.ArgumentException>(
+                () => new BeltShootingLogic(grid, new BeltModel(1, new BeltPath(2, 3)), slots), "Width/height swapped");
+            Assert.Throws<System.ArgumentException>(
+                () => new BeltShootingLogic(grid, new BeltModel(1, new BeltPath(3, 3)), slots), "Height differs");
+            Assert.DoesNotThrow(() => new BeltShootingLogic(grid, new BeltModel(1, new BeltPath(3, 2)), slots));
         }
 
         /// <summary>

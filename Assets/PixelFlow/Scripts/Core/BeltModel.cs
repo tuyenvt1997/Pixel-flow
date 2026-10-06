@@ -27,6 +27,11 @@ namespace PixelFlow.Core
         public int Capacity { get; }
 
         /// <summary>
+        /// The belt path (loop geometry) this belt runs on. This is the single source of a session's belt path.
+        /// </summary>
+        public BeltPath Path => _path;
+
+        /// <summary>
         /// Current number of tanks on the belt.
         /// </summary>
         public int Count => _count;

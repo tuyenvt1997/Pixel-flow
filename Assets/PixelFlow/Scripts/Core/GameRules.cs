@@ -28,9 +28,10 @@ namespace PixelFlow.Core
     {
         /// <summary>
         /// Evaluates the game state under the conveyor-belt rules.
+        /// Lost (checked first, latched immediately): a tank overflowed the waiting slots, even if no pixels remain.
         /// Won: no pixels remain.
-        /// Lost: a tank overflowed the waiting slots, or the supply, belt and entrance queue are all empty and no
-        /// waiting-slot tank's colour is on any front (this includes empty waiting slots).
+        /// Lost (stuck): the supply, belt and entrance queue are all empty and no waiting-slot tank's colour is on
+        /// any front (this includes empty waiting slots).
         /// Playing: otherwise. Allocation-free.
         /// </summary>
         /// <param name="grid">The pixel grid model.</param>
@@ -41,14 +42,15 @@ namespace PixelFlow.Core
         /// <returns>The current game state.</returns>
         public static GameState Evaluate(PixelGridModel grid, BeltModel belt, SlotQueueManager slots, SupplyModel supply, BeltShootingLogic shooting)
         {
-            if (grid.RemainingCount == 0)
-            {
-                return GameState.Won;
-            }
-
+            // Overflow is latched immediately, so it takes precedence over a board cleared in the same tick.
             if (shooting.Overflowed)
             {
                 return GameState.Lost;
+            }
+
+            if (grid.RemainingCount == 0)
+            {
+                return GameState.Won;
             }
 
             if (supply.IsEmpty && belt.Count == 0 && belt.QueuedCount == 0 && !shooting.CanAnyWaitingTankHit())
