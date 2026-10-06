@@ -272,6 +272,8 @@ namespace PixelFlow.EditorTools
         private static void ApplyTile(Material material, Texture2D tile)
         {
             material.SetTexture("_TileTex", tile);
+            // Small tiles grow back to the full cell and draw the gap in the shader (see InstancedColor.shader).
+            material.SetFloat("_FlatGrow", 1f / PixelGridRenderer.CubeScaleFactor);
             EditorUtility.SetDirty(material);
         }
 

@@ -7,12 +7,19 @@
 // corners are clipped). It is sampled with the object-space x/y of the unit cube (not the mesh UVs), so the front
 // face always shows the tile upright regardless of the cube's per-face UV layout. Without a texture (white) the
 // shader draws the plain colour.
+//
+// Small tiles degrade gracefully: the on-screen tile size is measured per vertex (object x axis projected to
+// pixels). Between 16 px and 6 px the bevel, gloss and corner clip fade to a flat square, and the face grows by up to
+// _FlatGrow in x/y so neighbouring cells touch; the gap between cells is then drawn in the shader as an anti-aliased
+// darker border, which stays even in both directions instead of aliasing into rows of whole-pixel gaps.
 Shader "PixelFlow/InstancedColor"
 {
     Properties
     {
         _BaseColor ("Base Color", Color) = (1, 1, 1, 1)
         _TileTex ("Tile (R shade, G 1-highlight, A mask)", 2D) = "white" {}
+        _FlatGrow ("Face growth for small tiles (1 / cube scale factor)", Float) = 1
+        _GapShade ("Colour multiplier of the drawn gap", Range(0, 1)) = 0.35
     }
 
     SubShader
@@ -36,6 +43,11 @@ Shader "PixelFlow/InstancedColor"
             TEXTURE2D(_TileTex);
             SAMPLER(sampler_TileTex);
 
+            CBUFFER_START(UnityPerMaterial)
+                float _FlatGrow;
+                float _GapShade;
+            CBUFFER_END
+
             UNITY_INSTANCING_BUFFER_START(Props)
                 UNITY_DEFINE_INSTANCED_PROP(float4, _BaseColor)
             UNITY_INSTANCING_BUFFER_END(Props)
@@ -49,7 +61,7 @@ Shader "PixelFlow/InstancedColor"
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
-                float2 uv         : TEXCOORD0;
+                float3 uvDetail   : TEXCOORD0; // xy = tile uv (0..1 on the tile, outside it on the grown border), z = detail
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -58,8 +70,18 @@ Shader "PixelFlow/InstancedColor"
                 Varyings output;
                 UNITY_SETUP_INSTANCE_ID(input);
                 UNITY_TRANSFER_INSTANCE_ID(input, output);
-                output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
-                output.uv = input.positionOS.xy + 0.5;
+
+                // On-screen width of the tile (the unit cube's x axis) in pixels.
+                float4 c0 = TransformObjectToHClip(float3(0, 0, 0));
+                float4 c1 = TransformObjectToHClip(float3(1, 0, 0));
+                float2 delta = (c1.xy / c1.w - c0.xy / c0.w) * 0.5 * _ScreenParams.xy;
+                float tilePixels = length(delta);
+                float detail = saturate((tilePixels - 6.0) / 10.0);
+
+                float grow = lerp(_FlatGrow, 1.0, detail);
+                float3 positionOS = float3(input.positionOS.xy * grow, input.positionOS.z);
+                output.positionCS = TransformObjectToHClip(positionOS);
+                output.uvDetail = float3(positionOS.xy + 0.5, detail);
                 return output;
             }
 
@@ -67,9 +89,25 @@ Shader "PixelFlow/InstancedColor"
             {
                 UNITY_SETUP_INSTANCE_ID(input);
                 float4 color = UNITY_ACCESS_INSTANCED_PROP(Props, _BaseColor);
-                half4 tile = SAMPLE_TEXTURE2D(_TileTex, sampler_TileTex, input.uv);
-                clip(tile.a - 0.5);
-                half3 rgb = lerp(half3(1, 1, 1), color.rgb * tile.r, tile.g);
+                float2 uv = input.uvDetail.xy;
+                half detail = (half)input.uvDetail.z;
+                half4 tile = SAMPLE_TEXTURE2D(_TileTex, sampler_TileTex, saturate(uv));
+
+                half shade = lerp(0.9h, tile.r, detail);
+                half keep = lerp(1.0h, tile.g, detail);
+                clip(lerp(1.0h, tile.a, detail) - 0.5h);
+
+                // Anti-aliased gap: the fraction of this pixel covered by the border band the face grew into
+                // plus the neighbour's (together the original gap, width g from the tile edge; zero for full-size
+                // tiles), box-filtered per axis.
+                float g = lerp(_FlatGrow, 1.0, input.uvDetail.z) - 1.0;
+                float2 outside = max(-uv, uv - 1.0);
+                float2 h = max(fwidth(uv), 1e-5) * 0.5;
+                float2 band = saturate((min(outside + h, g) - max(outside - h, 0.0)) / (2.0 * h));
+                half gap = (half)max(band.x, band.y);
+
+                half3 rgb = lerp(half3(1, 1, 1), color.rgb * shade, keep);
+                rgb *= lerp(1.0h, (half)_GapShade, gap);
                 return half4(rgb, color.a);
             }
             ENDHLSL
