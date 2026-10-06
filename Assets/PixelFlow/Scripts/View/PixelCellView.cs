@@ -42,7 +42,7 @@ namespace PixelFlow.View
         /// <summary>
         /// Starts the destroy animation. The cube is placed at <paramref name="worldPos"/>, coloured
         /// <paramref name="color"/> and scaled to <paramref name="size"/>; it shrinks to zero in
-        /// <see cref="ShrinkDuration"/> seconds (ease-in), then calls <c>debris.Burst(worldPos, color)</c>
+        /// <see cref="ShrinkDuration"/> seconds (ease-in), then calls <c>debris.Burst(worldPos, color, size)</c> (debris scales with the pixel)
         /// (skipped if debris is null) and finally <paramref name="onFinished"/>(this).
         /// </summary>
         /// <param name="worldPos">World-space centre of the cell.</param>
@@ -94,7 +94,7 @@ namespace PixelFlow.View
             _onFinished = null;
 
             if (debris != null)
-                debris.Burst(_worldPos, _color);
+                debris.Burst(_worldPos, _color, _size);
             onFinished?.Invoke(this);
         }
     }
