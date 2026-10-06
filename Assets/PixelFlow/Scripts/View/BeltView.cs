@@ -3,19 +3,24 @@ using System.Globalization;
 using PixelFlow.Core;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace PixelFlow.View
 {
     /// <summary>
     /// Presents the conveyor belt: a rounded-rectangle track one track-width outside the board, chevron arrows
-    /// showing the counter-clockwise direction of travel, and the "used/capacity" counter at the entrance
+    /// scrolling counter-clockwise in the direction of travel, and the "used/capacity" counter at the entrance
     /// (bottom-left). Maps fractional belt positions to world points for the tank views (<see cref="PositionToWorld"/>).
     /// <para>Belt position <c>p</c> sits on the track centreline next to its line (spec §1): bottom positions
-    /// under their column, right positions beside their row, and so on. Between the last position of an edge and the
-    /// first of the next, the path passes through the track's corner point instead of cutting diagonally.</para>
+    /// under their column, right positions beside their row, and so on. Between two positions the point moves at a
+    /// constant speed along the centreline; between the last position of an edge and the first of the next it follows
+    /// the rounded corner arc of the track.</para>
+    /// <para>The belt clock (<see cref="SetBeltClock"/>, pushed by the controller every frame while the belt runs)
+    /// gives the tick phase the tank views interpolate with, and scrolls the chevrons by the distance a tank covers on
+    /// a straight edge, so tanks and arrows move together; while the clock is not advanced everything holds still.</para>
     /// The track, chevrons, track rims and the board well (the darker panel inside the track) are one mesh with four
-    /// sub-meshes, rebuilt by <see cref="Build"/> (level load only).
-    /// Nothing allocates per frame.
+    /// sub-meshes, rebuilt by <see cref="Build"/> (level load only); the chevron vertices are rewritten in
+    /// <c>LateUpdate</c> into a preallocated array. Nothing allocates per frame.
     /// </summary>
     public sealed class BeltView : MonoBehaviour
     {
@@ -24,6 +29,8 @@ namespace PixelFlow.View
         private const float ChevronDepth = 0.58f;
         private const float RimDepth = 0.59f;
         private const float WellDepth = 0.62f;
+        private const float CornerRadiusFraction = 0.7f; // centreline arc radius / track width
+        private const int ChevronVertexCount = 8;
 
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
 
@@ -41,7 +48,8 @@ namespace PixelFlow.View
         [Min(0.1f)]
         [SerializeField] private float trackWidth = 0.9f;
 
-        [Tooltip("Distance in world units between two chevrons along an edge.")]
+        [Tooltip("Approximate distance in world units between two chevrons; they are spread evenly around the " +
+                 "whole track.")]
         [Min(0.2f)]
         [SerializeField] private float chevronSpacing = 1.3f;
 
@@ -67,6 +75,15 @@ namespace PixelFlow.View
         private readonly List<int> _rimTriangles = new List<int>(512);
         private readonly List<int> _wellTriangles = new List<int>(256);
 
+        private readonly Vector2[] _chevronShape = new Vector2[ChevronVertexCount];
+        private Vector3[] _meshVertices = new Vector3[0];
+        private int _chevronStart;
+        private int _chevronCount;
+        private float _chevronStep;
+        private float _chevronScroll;
+        private bool _chevronsDirty;
+        private float _clock;
+
         private Mesh _mesh;
         private MaterialPropertyBlock _props;
         private string[] _counterLabels = new string[0];
@@ -83,6 +100,11 @@ namespace PixelFlow.View
         private float _right;
         private float _bottom;
         private float _top;
+        private float _radius;
+        private float _straightX;
+        private float _straightY;
+        private float _arc;
+        private float _perimeter;
 
         /// <summary>
         /// Track width in world units (tanks on the belt are scaled to fit it).
@@ -93,6 +115,35 @@ namespace PixelFlow.View
         /// Number of belt positions of the last <see cref="Build"/> (0 when cleared).
         /// </summary>
         public int Length => _length;
+
+        /// <summary>
+        /// Belt clock last set with <see cref="SetBeltClock"/>, in belt positions within <c>[0, Length)</c>
+        /// (0 after <see cref="Build"/>).
+        /// </summary>
+        public float Clock => _clock;
+
+        /// <summary>
+        /// Fraction of the current tick interval that has elapsed, in <c>[0, 1)</c>: the fractional part of
+        /// <see cref="Clock"/>. Belt tanks are drawn this far from their previous position towards their model position.
+        /// </summary>
+        public float Phase => _clock - Mathf.Floor(_clock);
+
+        /// <summary>
+        /// Distance in world units the chevrons have scrolled along the track since <see cref="Build"/>, wrapped to
+        /// the spacing between two chevrons.
+        /// </summary>
+        public float ChevronScroll => _chevronScroll;
+
+        /// <summary>
+        /// Number of chevrons spread around the track (0 when cleared).
+        /// </summary>
+        public int ChevronCount => _chevronCount;
+
+        /// <summary>
+        /// Distance in world units along the track between two consecutive chevrons (the perimeter divided by
+        /// <see cref="ChevronCount"/>).
+        /// </summary>
+        public float ChevronStep => _chevronStep;
 
         /// <summary>
         /// Lays the track out around the board described by <paramref name="layout"/>: the centreline is one
@@ -114,6 +165,13 @@ namespace PixelFlow.View
             _right = _origin.x + _width * _cellSize + d;
             _bottom = _origin.y - d;
             _top = _origin.y + _height * _cellSize + d;
+            _radius = trackWidth * CornerRadiusFraction;
+            _straightX = _right - _left - 2f * _radius;
+            _straightY = _top - _bottom - 2f * _radius;
+            _arc = 0.5f * Mathf.PI * _radius;
+            _perimeter = 2f * (_straightX + _straightY) + 4f * _arc;
+            _clock = 0f;
+            _chevronScroll = 0f;
 
             BuildMesh();
 
@@ -152,6 +210,10 @@ namespace PixelFlow.View
         public void Clear()
         {
             _length = 0;
+            _chevronCount = 0;
+            _chevronsDirty = false;
+            _clock = 0f;
+            _chevronScroll = 0f;
             if (_mesh != null)
                 _mesh.Clear();
             if (trackRenderer != null)
@@ -164,9 +226,9 @@ namespace PixelFlow.View
 
         /// <summary>
         /// World point of a (fractional) belt position on the track centreline, with z = 0. Integer positions sit
-        /// next to their line; between two positions the point is interpolated linearly, through the corner point
-        /// when the two positions are on different edges. The position wraps around the loop, so
-        /// <c>Length - 0.5</c> (and <c>-0.5</c>) is the bottom-left corner at the entrance.
+        /// next to their line; between two positions the point moves at a constant speed along the centreline,
+        /// around the rounded corner arc when the two positions are on different edges. The position wraps around the
+        /// loop, so <c>Length - 0.5</c> (and <c>-0.5</c>) is the middle of the bottom-left arc at the entrance.
         /// </summary>
         /// <param name="position">Belt position; any value, taken modulo <see cref="Length"/>.</param>
         /// <returns>The world point, or this transform's position if nothing is built.</returns>
@@ -183,18 +245,32 @@ namespace PixelFlow.View
             if (k >= _length)
                 k = _length - 1;
             float t = p - k;
-            int next = k + 1 == _length ? 0 : k + 1;
+            float from = DistanceAt(k);
+            float to = k + 1 == _length ? _perimeter + DistanceAt(0) : DistanceAt(k + 1);
+            return TrackPoint(from + (to - from) * t, out _);
+        }
 
-            Vector3 a = PointAt(k);
-            Vector3 b = PointAt(next);
-            if (TryGetCornerAfter(k, out Vector3 corner))
-            {
-                return t < 0.5f
-                    ? Vector3.LerpUnclamped(a, corner, t * 2f)
-                    : Vector3.LerpUnclamped(corner, b, t * 2f - 1f);
-            }
+        /// <summary>
+        /// Moves the belt clock to <paramref name="clock"/> (completed ticks modulo <see cref="Length"/> plus the
+        /// elapsed fraction of the current tick). <see cref="Phase"/> follows it, and the chevrons scroll forward by
+        /// the distance the clock moved (wrapping at <see cref="Length"/>) times the cell size, i.e. exactly as far as
+        /// a tank on a straight edge. Not calling it freezes the belt. Allocation-free.
+        /// </summary>
+        /// <param name="clock">New belt clock, in <c>[0, Length)</c>.</param>
+        public void SetBeltClock(float clock)
+        {
+            if (_length <= 0)
+                return;
 
-            return Vector3.LerpUnclamped(a, b, t);
+            float delta = clock - _clock;
+            if (delta < 0f)
+                delta += _length;
+            _clock = clock;
+            if (delta <= 0f || _chevronCount == 0)
+                return;
+
+            _chevronScroll = Mathf.Repeat(_chevronScroll + delta * _cellSize, _chevronStep);
+            _chevronsDirty = true;
         }
 
         /// <summary>
@@ -237,6 +313,17 @@ namespace PixelFlow.View
             _shownCapacity = capacity;
         }
 
+        private void LateUpdate()
+        {
+            if (!_chevronsDirty || _mesh == null)
+                return;
+
+            _chevronsDirty = false;
+            WriteChevrons();
+            _mesh.SetVertices(_meshVertices, 0, _meshVertices.Length,
+                MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices);
+        }
+
         private void OnDestroy()
         {
             if (_mesh != null)
@@ -263,23 +350,71 @@ namespace PixelFlow.View
             return new Vector3(_left, _origin.y + row * _cellSize + half, 0f);
         }
 
-        private bool TryGetCornerAfter(int p, out Vector3 corner)
+        /// <summary>
+        /// Distance along the centreline loop (measured counter-clockwise from the end of the bottom-left arc) of
+        /// integer belt position <paramref name="p"/>.
+        /// </summary>
+        private float DistanceAt(int p)
         {
-            if (p == _width - 1)
-                corner = new Vector3(_right, _bottom, 0f);
-            else if (p == _width + _height - 1)
-                corner = new Vector3(_right, _top, 0f);
-            else if (p == 2 * _width + _height - 1)
-                corner = new Vector3(_left, _top, 0f);
-            else if (p == _length - 1)
-                corner = new Vector3(_left, _bottom, 0f);
-            else
+            Vector3 point = PointAt(p);
+            if (p < _width)
+                return point.x - (_left + _radius);
+            if (p < _width + _height)
+                return _straightX + _arc + point.y - (_bottom + _radius);
+            if (p < 2 * _width + _height)
+                return _straightX + _straightY + 2f * _arc + (_right - _radius) - point.x;
+            return 2f * _straightX + _straightY + 3f * _arc + (_top - _radius) - point.y;
+        }
+
+        /// <summary>
+        /// Point (z = 0) and unit tangent (direction of travel) at <paramref name="distance"/> along the centreline
+        /// loop: bottom edge, bottom-right arc, right edge, top-right arc, top edge, top-left arc, left edge,
+        /// bottom-left arc. The distance wraps around the loop.
+        /// </summary>
+        private Vector3 TrackPoint(float distance, out Vector2 tangent)
+        {
+            float s = Mathf.Repeat(distance, _perimeter);
+            for (int c = 0; c < 4; c++)
             {
-                corner = default;
-                return false;
+                float straight = (c & 1) == 0 ? _straightX : _straightY;
+                if (s < straight)
+                    return StraightPoint(c, s, out tangent);
+
+                s -= straight;
+                if (s < _arc || c == 3) // the last arc also absorbs any rounding remainder
+                {
+                    float angle = (-90f + 90f * c + 90f * Mathf.Min(s / _arc, 1f)) * Mathf.Deg2Rad;
+                    float cos = Mathf.Cos(angle);
+                    float sin = Mathf.Sin(angle);
+                    tangent = new Vector2(-sin, cos);
+                    Vector2 centre = CornerCentre(c);
+                    return new Vector3(centre.x + cos * _radius, centre.y + sin * _radius, 0f);
+                }
+
+                s -= _arc;
             }
 
-            return true;
+            tangent = Vector2.right; // not reached
+            return new Vector3(_left + _radius, _bottom, 0f);
+        }
+
+        private Vector3 StraightPoint(int edge, float s, out Vector2 tangent)
+        {
+            switch (edge)
+            {
+                case 0:
+                    tangent = Vector2.right;
+                    return new Vector3(_left + _radius + s, _bottom, 0f);
+                case 1:
+                    tangent = Vector2.up;
+                    return new Vector3(_right, _bottom + _radius + s, 0f);
+                case 2:
+                    tangent = Vector2.left;
+                    return new Vector3(_right - _radius - s, _top, 0f);
+                default:
+                    tangent = Vector2.down;
+                    return new Vector3(_left, _top - _radius - s, 0f);
+            }
         }
 
         private void BuildMesh()
@@ -299,14 +434,19 @@ namespace PixelFlow.View
 
             AddTrackBand();
             AddWell();
-            AddChevrons(new Vector3(_left, _bottom), new Vector3(_right, _bottom), Vector3.right);
-            AddChevrons(new Vector3(_right, _bottom), new Vector3(_right, _top), Vector3.up);
-            AddChevrons(new Vector3(_right, _top), new Vector3(_left, _top), Vector3.left);
-            AddChevrons(new Vector3(_left, _top), new Vector3(_left, _bottom), Vector3.down);
+            AddChevrons();
+
+            // Level load only: the cached array the chevron vertices are rewritten into whenever they move.
+            if (_meshVertices.Length != _vertices.Count)
+                _meshVertices = new Vector3[_vertices.Count];
+            _vertices.CopyTo(_meshVertices);
+            WriteChevrons();
+            _chevronsDirty = false;
 
             _mesh.Clear();
+            _mesh.MarkDynamic();
             _mesh.subMeshCount = 4;
-            _mesh.SetVertices(_vertices);
+            _mesh.SetVertices(_meshVertices);
             _mesh.SetTriangles(_trackTriangles, 0);
             _mesh.SetTriangles(_chevronTriangles, 1);
             _mesh.SetTriangles(_rimTriangles, 2);
@@ -412,47 +552,63 @@ namespace PixelFlow.View
         }
 
         /// <summary>
-        /// Adds evenly spaced chevrons pointing along <paramref name="direction"/> on the straight part of the edge
-        /// from <paramref name="from"/> to <paramref name="to"/> (centreline corner points).
+        /// Adds the chevrons to sub-mesh 1: <c>round(perimeter / chevronSpacing)</c> chevrons spread evenly around the
+        /// whole centreline loop, two bars (eight vertices) each. Only the triangles and placeholder vertices are added
+        /// here; <see cref="WriteChevrons"/> places the vertices. Also fills the chevron shape (vertex offsets along
+        /// and across the track, tip pointing in the direction of travel).
         /// </summary>
-        private void AddChevrons(Vector3 from, Vector3 to, Vector3 direction)
-        {
-            float margin = trackWidth * 1.2f;
-            float length = Vector3.Distance(from, to) - 2f * margin;
-            if (length <= 0f)
-                return;
-
-            int count = Mathf.Max(1, Mathf.FloorToInt(length / chevronSpacing) + 1);
-            float step = count > 1 ? length / (count - 1) : 0f;
-            Vector3 first = from + direction * (margin + (count > 1 ? 0f : length * 0.5f));
-            for (int i = 0; i < count; i++)
-                AddChevron(first + direction * (step * i), direction);
-        }
-
-        private void AddChevron(Vector3 centre, Vector3 direction)
+        private void AddChevrons()
         {
             float size = trackWidth * 0.32f;
             float thickness = trackWidth * 0.09f;
-            Vector3 perp = new Vector3(-direction.y, direction.x, 0f);
-            Vector3 tip = centre + direction * (size * 0.5f);
-            Vector3 armA = centre - direction * (size * 0.5f) + perp * size;
-            Vector3 armB = centre - direction * (size * 0.5f) - perp * size;
-            AddBar(tip, armA, thickness);
-            AddBar(tip, armB, thickness);
+            var tip = new Vector2(size * 0.5f, 0f);
+            SetBarShape(0, tip, new Vector2(-size * 0.5f, size), thickness);
+            SetBarShape(4, tip, new Vector2(-size * 0.5f, -size), thickness);
+
+            _chevronCount = Mathf.Max(1, Mathf.RoundToInt(_perimeter / chevronSpacing));
+            _chevronStep = _perimeter / _chevronCount;
+            _chevronStart = _vertices.Count;
+            for (int i = 0; i < _chevronCount; i++)
+            {
+                int start = _vertices.Count;
+                for (int v = 0; v < ChevronVertexCount; v++)
+                    _vertices.Add(Vector3.zero);
+                AddQuad(_chevronTriangles, start, start + 1, start + 2, start + 3);
+                AddQuad(_chevronTriangles, start + 4, start + 5, start + 6, start + 7);
+            }
         }
 
-        private void AddBar(Vector3 a, Vector3 b, float thickness)
+        private void SetBarShape(int index, Vector2 a, Vector2 b, float thickness)
         {
-            Vector3 along = (b - a).normalized;
-            Vector3 side = new Vector3(-along.y, along.x, 0f) * (thickness * 0.5f);
-            Vector3 extend = along * (thickness * 0.5f);
-            int start = _vertices.Count;
-            Vector3 depth = new Vector3(0f, 0f, ChevronDepth);
-            _vertices.Add(a - extend - side + depth);
-            _vertices.Add(a - extend + side + depth);
-            _vertices.Add(b + extend + side + depth);
-            _vertices.Add(b + extend - side + depth);
-            AddQuad(_chevronTriangles, start, start + 1, start + 2, start + 3);
+            Vector2 along = (b - a).normalized;
+            Vector2 side = new Vector2(-along.y, along.x) * (thickness * 0.5f);
+            Vector2 extend = along * (thickness * 0.5f);
+            _chevronShape[index] = a - extend - side;
+            _chevronShape[index + 1] = a - extend + side;
+            _chevronShape[index + 2] = b + extend + side;
+            _chevronShape[index + 3] = b + extend - side;
+        }
+
+        /// <summary>
+        /// Places every chevron vertex into the cached vertex array: chevron <c>i</c> is centred
+        /// <c>scroll + i * step</c> along the loop, and each vertex is offset along the centreline, then across it
+        /// (along the local normal), so the chevrons follow the track tangent and bend through the corner arcs.
+        /// Allocation-free.
+        /// </summary>
+        private void WriteChevrons()
+        {
+            for (int i = 0; i < _chevronCount; i++)
+            {
+                float centre = _chevronScroll + i * _chevronStep;
+                int start = _chevronStart + i * ChevronVertexCount;
+                for (int v = 0; v < ChevronVertexCount; v++)
+                {
+                    Vector2 shape = _chevronShape[v];
+                    Vector3 point = TrackPoint(centre + shape.x, out Vector2 tangent);
+                    _meshVertices[start + v] = new Vector3(point.x - tangent.y * shape.y,
+                        point.y + tangent.x * shape.y, ChevronDepth);
+                }
+            }
         }
 
         private static void AddQuad(List<int> triangles, int a, int b, int c, int d)

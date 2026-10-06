@@ -138,6 +138,64 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
+        /// While the belt runs, a riding tank advances every frame: over 40 consecutive frames its world position
+        /// changes and its display position strictly increases (no frame without movement, no backward step, no
+        /// jump of more than a few positions), it never runs ahead of its model position, and the chevron vertices
+        /// of the track mesh move every frame.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator BeltRunning_TankMovesEveryFrame_AndChevronsScroll()
+        {
+            const int frames = 40;
+            yield return LoadGameScene();
+            LevelData level = CreateTapLevel();
+            _controller.LoadLevel(level);
+            TankBoardView board = Object.FindFirstObjectByType<TankBoardView>();
+            BeltView belt = Object.FindFirstObjectByType<BeltView>();
+            Mesh track = belt.GetComponentInChildren<MeshFilter>().sharedMesh;
+            LevelSession s = _controller.Session;
+
+            ColorTankModel tank = s.Supply.PeekFront(0);
+            Assert.IsTrue(_controller.TryLaunchFromLane(0));
+
+            // Past the entrance blend (0.12 s) and on the bottom edge.
+            float start = Time.realtimeSinceStartup;
+            int position;
+            while (!s.Belt.TryGetPosition(tank, out position) || position < 8)
+            {
+                Assert.Less(Time.realtimeSinceStartup - start, 10f, "The tank did not ride the belt.");
+                yield return null;
+            }
+            yield return null;
+
+            Assert.IsTrue(board.TryGetBeltDisplayPosition(tank, out float lastDisplay));
+            Vector3 lastWorld = board.GetMuzzle(tank);
+            Vector3[] lastChevrons = track.vertices;
+            for (int f = 0; f < frames; f++)
+            {
+                yield return null;
+                Assert.AreEqual(GameState.Playing, _controller.State);
+                Assert.IsTrue(board.TryGetBeltDisplayPosition(tank, out float display), "The tank left the belt.");
+                Assert.IsTrue(s.Belt.TryGetPosition(tank, out position));
+                Vector3 world = board.GetMuzzle(tank);
+
+                Assert.Greater(display, lastDisplay, $"Frame {f}: the tank did not advance (or stepped back).");
+                Assert.Less(display - lastDisplay, 4f, $"Frame {f}: the tank jumped.");
+                Assert.LessOrEqual(display, position, $"Frame {f}: the tank ran ahead of its model position.");
+                Assert.Greater(Vector3.Distance(world, lastWorld), 1e-5f, $"Frame {f}: the tank did not move.");
+
+                Vector3[] chevrons = track.vertices;
+                Assert.IsFalse(SameVertices(lastChevrons, chevrons), $"Frame {f}: the chevrons did not move.");
+
+                lastDisplay = display;
+                lastWorld = world;
+                lastChevrons = chevrons;
+            }
+
+            Object.Destroy(level);
+        }
+
+        /// <summary>
         /// A tank that finished its lap waits in slot 0; a synthesized tap on it removes it from the slot and
         /// launches it onto the belt again.
         /// </summary>
@@ -243,8 +301,9 @@ namespace PixelFlow.Tests
         /// <summary>
         /// Two waiting slots hold colour-1 tanks; then a colour-1 tank overflows while a long-lived colour-0 tank
         /// keeps firing, so projectiles are still in flight when the rules report Lost. From that moment the result
-        /// is latched: the belt no longer advances, lane and slot launches are rejected although the belt has room,
-        /// the lose popup still appears once everything has drained, and the overflowed tank's view is released.
+        /// is latched: the belt no longer advances (nor do the shooter's view and the chevrons), lane and slot
+        /// launches are rejected although the belt has room, the lose popup still appears once everything has
+        /// drained, and the overflowed tank's view is released.
         /// </summary>
         [UnityTest]
         public IEnumerator Overflow_WhileShooting_FreezesBeltAndRejectsLaunches()
@@ -288,10 +347,21 @@ namespace PixelFlow.Tests
             Assert.AreEqual(1, s.Supply.TotalRemaining);
             Assert.AreEqual(2, s.Tray.Count);
 
+            // The views are frozen too: after this frame's LateUpdate neither the shooter nor the chevrons move.
+            yield return null;
+            Mesh track = Object.FindFirstObjectByType<BeltView>().GetComponentInChildren<MeshFilter>().sharedMesh;
+            Vector3[] frozenChevrons = track.vertices;
+            Assert.IsTrue(board.TryGetBeltDisplayPosition(shooter, out float frozenDisplay));
+            Vector3 frozenWorld = board.GetMuzzle(shooter);
+
             // At timeScale 4 a 20x20 belt ticks every 12.5 ms of real time; give it many tick intervals.
             yield return new WaitForSeconds(0.4f);
             Assert.IsTrue(s.Belt.TryGetPosition(shooter, out int position));
             Assert.AreEqual(frozenPosition, position, "The belt kept advancing after the overflow.");
+            Assert.IsTrue(board.TryGetBeltDisplayPosition(shooter, out float display));
+            Assert.AreEqual(frozenDisplay, display, "The shooter's view kept moving after the overflow.");
+            Assert.AreEqual(frozenWorld, board.GetMuzzle(shooter));
+            Assert.IsTrue(SameVertices(frozenChevrons, track.vertices), "The chevrons kept moving after the overflow.");
             Assert.AreEqual(remaining, s.Grid.RemainingCount, "The belt kept firing after the overflow.");
             Assert.AreEqual(ammo, shooter.Ammo);
 
@@ -479,8 +549,8 @@ namespace PixelFlow.Tests
         /// <summary>
         /// Starter level 3 (16x16) is played with the <c>AutoPlayer</c> policy until a quarter of its pixels are
         /// gone with at least three tanks on the belt and projectiles in flight; the game camera is then captured to
-        /// Logs/belt_capture.png for a visual check of the belt layout (track, chevrons, counter, slots, lanes); the win
-        /// and lose popups are then shown over the paused board and captured to Logs/ui_win.png and Logs/ui_lose.png.
+        /// Logs/belt_capture.png for a visual check of the belt layout (track, chevrons, counter, slots, lanes), then
+        /// three frames 0.1 s apart to Logs/belt_motion_0..2.png for a check of the belt motion; the win and lose popups are then shown over the paused board and captured to Logs/ui_win.png and Logs/ui_lose.png.
         /// </summary>
         [UnityTest]
         public IEnumerator Level3_MidGame_CapturesBelt()
@@ -506,6 +576,15 @@ namespace PixelFlow.Tests
 
             CaptureCamera("belt_capture.png");
             Assert.IsTrue(File.Exists(Path.Combine(Application.dataPath, "..", "Logs", "belt_capture.png")));
+
+            // Three consecutive frames about 0.1 s apart, to check that the chevrons and the tanks advance evenly.
+            for (int i = 0; i < 3; i++)
+            {
+                if (i > 0)
+                    yield return new WaitForSeconds(0.1f);
+                CaptureCamera($"belt_motion_{i}.png");
+                Assert.IsTrue(File.Exists(Path.Combine(Application.dataPath, "..", "Logs", $"belt_motion_{i}.png")));
+            }
 
             // The result popups over the same mid-game board, for a visual check of the HUD skin.
             Time.timeScale = 0f;
@@ -776,6 +855,18 @@ namespace PixelFlow.Tests
             Transform t = _hud.transform.Find("WinPanel/NextButton");
             Assert.IsNotNull(t, "Next button missing.");
             return t.GetComponent<Button>();
+        }
+
+        private static bool SameVertices(Vector3[] a, Vector3[] b)
+        {
+            if (a.Length != b.Length)
+                return false;
+            for (int i = 0; i < a.Length; i++)
+            {
+                if (a[i] != b[i])
+                    return false;
+            }
+            return true;
         }
 
         private static int CountPixels(LevelData level)

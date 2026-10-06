@@ -42,7 +42,9 @@ namespace PixelFlow.View
     /// </list>
     /// Model events tween the views: <see cref="SupplyModel.OnLaneChanged"/> and the waiting-slot events move them with
     /// <see cref="ColorTankView.MoveTo"/>; <see cref="BeltModel.OnTankQueued"/> sends a tank to the entrance; belt
-    /// tanks then glide smoothly from position to position (one position per tick interval) in <c>Update</c>. A tank
+    /// tanks are then drawn in <c>LateUpdate</c> at their model position interpolated with the belt clock's tick
+    /// phase (<see cref="BeltView.Phase"/>, <see cref="InterpolateBeltPosition"/>), so they move at a constant pace
+    /// and hold still while the clock is frozen. A tank
     /// leaving the belt with ammo left goes to its waiting slot (on <see cref="BeltShootingLogic.OnOverflow"/>, when
     /// every slot is full, it plays the depletion instead); a depleted one plays
     /// <see cref="ColorTankView.PlayDeplete"/> where it is and is then returned to the pool. Nothing allocates per frame.
@@ -56,7 +58,7 @@ namespace PixelFlow.View
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
 
         /// <summary>
-        /// One tank riding the belt: its view, the position the model reports and the smoothly animated position.
+        /// One tank riding the belt: its view, the position the model reports and the interpolated display position.
         /// </summary>
         private struct Rider
         {
@@ -116,10 +118,10 @@ namespace PixelFlow.View
         private Action<ColorTankView> _onDepleteFinished;
 
         /// <summary>
-        /// Seconds one belt lap takes; belt tanks glide <c>Length / LapSeconds</c> positions per second. Set by the
-        /// controller before <see cref="Build"/>.
+        /// Belt position at which a tank that has just entered the belt is drawn at the start of its first tick: the
+        /// entrance corner, half a position before position 0.
         /// </summary>
-        public float LapSeconds { get; set; } = 4f;
+        public const float EntrancePositionOffset = -0.5f;
 
         /// <summary>
         /// Number of tank views currently shown (bound views, including those still playing depletion).
@@ -317,21 +319,52 @@ namespace PixelFlow.View
             return RootPoint(trayRoot, offset);
         }
 
-        private void Update()
+        /// <summary>
+        /// Fractional belt position a belt tank is drawn at, interpolated from the tick clock: a tank the model
+        /// reports at <paramref name="target"/> (it moved there on the last tick) is drawn <paramref name="phase"/> of
+        /// the way from <c>target - 1</c> to <c>target</c>, so it reaches its position exactly when the next tick
+        /// fires from there, and then continues seamlessly from it. A tank that has just entered
+        /// (<paramref name="target"/> 0) waits at the entrance corner (<see cref="EntrancePositionOffset"/>) until the
+        /// interpolation passes it. The result never exceeds <paramref name="target"/>, is non-decreasing in
+        /// <paramref name="phase"/> and depends on nothing else, so a frozen clock holds the tank still.
+        /// </summary>
+        /// <param name="target">Belt position last reported by the model for the tank.</param>
+        /// <param name="phase">Elapsed fraction of the current tick interval; clamped to <c>[0, 1]</c>.</param>
+        /// <returns>The display position.</returns>
+        public static float InterpolateBeltPosition(int target, float phase)
+        {
+            float position = target - 1f + Mathf.Clamp01(phase);
+            if (target == 0 && position < EntrancePositionOffset)
+                position = EntrancePositionOffset;
+            return position;
+        }
+
+        /// <summary>
+        /// The fractional belt position <paramref name="tank"/> is currently drawn at (see
+        /// <see cref="InterpolateBeltPosition"/>), as of the last <c>LateUpdate</c> or entry.
+        /// </summary>
+        /// <param name="tank">Tank model.</param>
+        /// <param name="position">The display position on success, otherwise 0.</param>
+        /// <returns>True if <paramref name="tank"/> rides the belt.</returns>
+        public bool TryGetBeltDisplayPosition(ColorTankModel tank, out float position)
+        {
+            int rider = FindRider(tank);
+            position = rider >= 0 ? _riders[rider].display : 0f;
+            return rider >= 0;
+        }
+
+        // LateUpdate: the controller has run this frame's ticks and pushed the belt clock in its Update.
+        private void LateUpdate()
         {
             if (_riderCount == 0 || _belt == null)
                 return;
 
             float dt = Time.deltaTime;
-            float speed = LapSeconds > 0f ? _belt.Length / LapSeconds : float.MaxValue;
+            float phase = _belt.Phase;
             for (int i = 0; i < _riderCount; i++)
             {
                 ref Rider r = ref _riders[i];
-
-                // Glide one position per tick; never lag more than one position behind the model.
-                r.display = Mathf.Min(r.target, r.display + speed * dt);
-                if (r.display < r.target - 1f)
-                    r.display = r.target - 1f;
+                r.display = InterpolateBeltPosition(r.target, phase);
 
                 Vector3 world = _belt.PositionToWorld(r.display);
                 if (r.blend < 1f)
@@ -472,7 +505,7 @@ namespace PixelFlow.View
                     tank = tank,
                     view = view,
                     target = 0,
-                    display = -0.5f, // the entrance corner, half a position before position 0
+                    display = EntrancePositionOffset,
                     blendFrom = view.transform.position,
                     blend = 0f,
                 };

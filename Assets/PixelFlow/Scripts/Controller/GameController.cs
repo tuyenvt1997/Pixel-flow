@@ -15,7 +15,8 @@ namespace PixelFlow.Controller
     /// Wires the Core model to the View layer and drives one level at a time:
     /// tapping a lane-front or waiting-slot tank launches it onto the conveyor belt, a belt timer runs
     /// <see cref="BeltShootingLogic.Tick"/> every <c>lapSeconds / L</c> seconds (one lap takes <c>lapSeconds</c> on
-    /// every board size), every shot becomes a projectile, arrivals are queued and destroyed under a per-frame
+    /// every board size) and pushes the belt clock (ticks plus tick phase, <see cref="BeltView.SetBeltClock"/>) the
+    /// belt tanks and chevrons are animated with, every shot becomes a projectile, arrivals are queued and destroyed under a per-frame
     /// budget, and the game ends (HUD popup) once the belt rules report Won/Lost and nothing is still in flight.
     /// Nothing is instantiated or allocated per frame; all handlers are cached delegates.
     /// </summary>
@@ -30,6 +31,7 @@ namespace PixelFlow.Controller
         private const int DestroyQueueCapacity = 256;
         private const float RaycastDistance = 100f;
         private const float MinLapSeconds = 0.5f;
+        private const float MaxBeltPhase = 0.9999f;
 
         /// <summary>
         /// One arrived projectile waiting for its cell to be destroyed.
@@ -94,6 +96,7 @@ namespace PixelFlow.Controller
         private BoardLayout _layout;
         private float _tickTimer;
         private float _tickInterval;
+        private int _beltTicks;
         private int _currentIndex;
         private GameState _result;
         private readonly Stopwatch _loadWatch = new Stopwatch();
@@ -261,11 +264,11 @@ namespace PixelFlow.Controller
             _tickInterval = lapSeconds / path.Length;
             gridRenderer.Build(_session.Grid, _session.Palette, _layout);
             beltView.Build(path, _layout);
-            tankBoard.LapSeconds = lapSeconds;
             tankBoard.Build(_session, beltView);
             hud.SetLevel(_currentIndex + 1);
             hud.HideAll();
             _tickTimer = 0f;
+            _beltTicks = 0;
             _result = GameState.Playing;
             State = GameState.Playing;
 
@@ -331,6 +334,7 @@ namespace PixelFlow.Controller
             {
                 HandleInput();
                 RunBeltTimer(Time.deltaTime);
+                PushBeltClock();
                 if (_result == GameState.Playing)
                     _result = EvaluateRules();
             }
@@ -388,6 +392,8 @@ namespace PixelFlow.Controller
             {
                 _tickTimer -= _tickInterval;
                 ticks++;
+                if (++_beltTicks >= _session.Belt.Path.Length)
+                    _beltTicks = 0;
                 Tick();
 
                 // Latch the result on the tick that produced it, so later catch-up ticks of this frame cannot
@@ -399,6 +405,18 @@ namespace PixelFlow.Controller
 
             if (ticks == MaxTicksPerFrame && _tickTimer > _tickInterval)
                 _tickTimer = 0f; // drop the backlog after a long frame instead of catching up forever
+        }
+
+        /// <summary>
+        /// Gives the views the belt clock: completed ticks (modulo the belt length) plus the elapsed fraction of the
+        /// current tick interval, clamped below 1 so a backlog left by a latching tick cannot run a tank past its
+        /// model position. Called every frame the belt runs; once the result is latched it is no longer called, which
+        /// freezes the belt tanks and chevrons.
+        /// </summary>
+        private void PushBeltClock()
+        {
+            float phase = Mathf.Clamp(_tickTimer / _tickInterval, 0f, MaxBeltPhase);
+            beltView.SetBeltClock(_beltTicks + phase);
         }
 
         private void Tick()
