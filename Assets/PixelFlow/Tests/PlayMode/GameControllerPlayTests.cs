@@ -20,7 +20,8 @@ namespace PixelFlow.Tests
 {
     /// <summary>
     /// End-to-end tests of the generated Game scene under the conveyor-belt rules: auto-play to a win (starter
-    /// level 1 and the sun level), cycling through all levels with Next, an overflow loss, launch capacity, tapping
+    /// level 1 and the sun level), cycling through all levels with Next, an overflow loss (and the latched result
+    /// while shots drain), launch capacity, tapping
     /// lane-front and waiting-slot tanks, retry with tanks on the belt, the level load time budget and a mid-game
     /// capture of the belt layout.
     /// </summary>
@@ -223,12 +224,94 @@ namespace PixelFlow.Tests
             Assert.IsTrue(Panel("LosePanel").activeSelf, "Lose popup not shown.");
             Assert.IsFalse(Panel("WinPanel").activeSelf, "Win popup shown on a loss.");
 
+            // The overflowed tank has no slot: its view shrinks away and returns to the pool; only the slot tank's
+            // view is left.
+            TankBoardView board = Object.FindFirstObjectByType<TankBoardView>();
+            yield return new WaitForSeconds(ColorTankView.DefaultDepleteDuration + 0.1f);
+            Assert.AreEqual(1, board.ActiveViewCount, "The overflowed tank's view was not released.");
+
             RetryButton().onClick.Invoke();
             Assert.AreEqual(GameState.Playing, _controller.State);
             Assert.IsFalse(Panel("LosePanel").activeSelf, "Lose popup still shown after retry.");
             Assert.AreEqual(0, _controller.Session.Tray.Count);
             Assert.AreEqual(0, OnBelt(_controller.Session));
             Assert.AreEqual(2, _controller.Session.Supply.TotalRemaining);
+
+            Object.Destroy(level);
+        }
+
+        /// <summary>
+        /// Two waiting slots hold colour-1 tanks; then a colour-1 tank overflows while a long-lived colour-0 tank
+        /// keeps firing, so projectiles are still in flight when the rules report Lost. From that moment the result
+        /// is latched: the belt no longer advances, lane and slot launches are rejected although the belt has room,
+        /// the lose popup still appears once everything has drained, and the overflowed tank's view is released.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Overflow_WhileShooting_FreezesBeltAndRejectsLaunches()
+        {
+            yield return LoadGameScene();
+            LevelData level = CreateResolvingLevel();
+            _controller.LoadLevel(level);
+            TankBoardView board = Object.FindFirstObjectByType<TankBoardView>();
+            LevelSession s = _controller.Session;
+            Time.timeScale = 4f;
+
+            Assert.IsTrue(_controller.TryLaunchFromLane(0));
+            Assert.IsTrue(_controller.TryLaunchFromLane(0));
+            yield return WaitForSlotCount(s, 2);
+
+            ColorTankModel overflowing = s.Supply.PeekFront(0);
+            Assert.IsTrue(_controller.TryLaunchFromLane(0));
+            ColorTankModel shooter = s.Supply.PeekFront(0);
+            Assert.IsTrue(_controller.TryLaunchFromLane(0));
+            Assert.AreEqual(1, overflowing.ColorId, "The first rider must be a colour-1 tank that never fires.");
+            Assert.AreEqual(0, shooter.ColorId, "The second rider must be the colour-0 shooter.");
+
+            float start = Time.realtimeSinceStartup;
+            while (!s.BeltShooting.Overflowed)
+            {
+                Assert.Less(Time.realtimeSinceStartup - start, 10f, "Overflow not reached.");
+                yield return null;
+            }
+
+            Assert.AreEqual(GameState.Playing, _controller.State, "Nothing in flight at the overflow; test is void.");
+            Assert.IsTrue(_controller.IsResolving, "The overflow result was not latched.");
+            Assert.Greater(_controller.ActiveProjectiles + _controller.PendingDestroys, 0);
+            Assert.AreEqual(1, s.Belt.Count, "Only the shooter rides after the overflow.");
+            Assert.IsTrue(s.Belt.TryGetPosition(shooter, out int frozenPosition));
+            int remaining = s.Grid.RemainingCount;
+            int ammo = shooter.Ammo;
+
+            Assert.IsFalse(s.Belt.IsFull);
+            Assert.IsFalse(_controller.TryLaunchFromLane(0), "Lane launch accepted while resolving.");
+            Assert.IsFalse(_controller.TryLaunchFromSlot(0), "Slot launch accepted while resolving.");
+            Assert.AreEqual(1, s.Supply.TotalRemaining);
+            Assert.AreEqual(2, s.Tray.Count);
+
+            // At timeScale 4 a 20x20 belt ticks every 12.5 ms of real time; give it many tick intervals.
+            yield return new WaitForSeconds(0.4f);
+            Assert.IsTrue(s.Belt.TryGetPosition(shooter, out int position));
+            Assert.AreEqual(frozenPosition, position, "The belt kept advancing after the overflow.");
+            Assert.AreEqual(remaining, s.Grid.RemainingCount, "The belt kept firing after the overflow.");
+            Assert.AreEqual(ammo, shooter.Ammo);
+
+            start = Time.realtimeSinceStartup;
+            while (_controller.State == GameState.Playing)
+            {
+                Assert.Less(Time.realtimeSinceStartup - start, 10f, "Lost state not reached.");
+                yield return null;
+            }
+
+            Assert.AreEqual(GameState.Lost, _controller.State);
+            Assert.IsFalse(_controller.IsResolving);
+            Assert.IsTrue(Panel("LosePanel").activeSelf, "Lose popup not shown.");
+            Assert.IsFalse(Panel("WinPanel").activeSelf, "Win popup shown on a loss.");
+            Assert.IsTrue(s.Belt.TryGetPosition(shooter, out position));
+            Assert.AreEqual(frozenPosition, position, "The belt advanced while draining.");
+
+            // Views left: two slot tanks, the frozen shooter and the lane tank; the overflowed one is released.
+            yield return new WaitForSeconds(ColorTankView.DefaultDepleteDuration + 0.1f);
+            Assert.AreEqual(4, board.ActiveViewCount, "The overflowed tank's view was not released.");
 
             Object.Destroy(level);
         }
@@ -639,6 +722,32 @@ namespace PixelFlow.Tests
                 level.tanks[i] = new ColorTankData { colorId = 1, ammo = 1 };
             level.laneCount = 1;
             level.slotCount = 1;
+            return level;
+        }
+
+        /// <summary>
+        /// 20x20 board of colour 0 (no colour-1 cell), two waiting slots (belt capacity 2) and one lane of, front
+        /// first: two colour-1 tanks (to fill the slots), a colour-1 tank (to overflow), a colour-0 tank with 300
+        /// ammo (fires every tick, never clears the board) and a spare colour-1 tank (keeps the supply non-empty).
+        /// </summary>
+        private static LevelData CreateResolvingLevel()
+        {
+            var level = ScriptableObject.CreateInstance<LevelData>();
+            level.name = "ResolvingTestLevel";
+            level.width = 20;
+            level.height = 20;
+            level.palette = new Color32[] { new Color32(220, 60, 60, 255), new Color32(60, 120, 220, 255) };
+            level.cells = new byte[level.width * level.height];
+            level.tanks = new[]
+            {
+                new ColorTankData { colorId = 1, ammo = 1 },
+                new ColorTankData { colorId = 1, ammo = 1 },
+                new ColorTankData { colorId = 1, ammo = 1 },
+                new ColorTankData { colorId = 0, ammo = 300 },
+                new ColorTankData { colorId = 1, ammo = 1 },
+            };
+            level.laneCount = 1;
+            level.slotCount = 2;
             return level;
         }
 

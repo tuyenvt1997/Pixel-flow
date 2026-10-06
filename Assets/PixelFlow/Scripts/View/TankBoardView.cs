@@ -43,7 +43,8 @@ namespace PixelFlow.View
     /// Model events tween the views: <see cref="SupplyModel.OnLaneChanged"/> and the waiting-slot events move them with
     /// <see cref="ColorTankView.MoveTo"/>; <see cref="BeltModel.OnTankQueued"/> sends a tank to the entrance; belt
     /// tanks then glide smoothly from position to position (one position per tick interval) in <c>Update</c>. A tank
-    /// leaving the belt with ammo left goes to its waiting slot; a depleted one plays
+    /// leaving the belt with ammo left goes to its waiting slot (on <see cref="BeltShootingLogic.OnOverflow"/>, when
+    /// every slot is full, it plays the depletion instead); a depleted one plays
     /// <see cref="ColorTankView.PlayDeplete"/> where it is and is then returned to the pool. Nothing allocates per frame.
     /// </summary>
     public sealed class TankBoardView : MonoBehaviour
@@ -110,6 +111,7 @@ namespace PixelFlow.View
         private Action<ColorTankModel> _onTankEntered;
         private Action<ColorTankModel, int> _onTankMoved;
         private Action<ColorTankModel, bool> _onTankLeft;
+        private Action<ColorTankModel> _onOverflow;
         private Action<ColorTankView> _onDepleteFinished;
 
         /// <summary>
@@ -136,8 +138,8 @@ namespace PixelFlow.View
         /// <summary>
         /// Shows <paramref name="session"/>: clears any previous board, takes one pooled view per tank in the
         /// supply lanes and the waiting slots, binds it with its palette colour, snaps it to its layout position,
-        /// shows one empty frame per waiting slot, resets the belt counter and subscribes to the supply, waiting-slot
-        /// and belt events.
+        /// shows one empty frame per waiting slot, resets the belt counter and subscribes to the supply, waiting-slot,
+        /// belt and overflow events.
         /// </summary>
         /// <param name="session">Level session to present.</param>
         /// <param name="belt">Belt view, already built for this session's board.</param>
@@ -187,6 +189,7 @@ namespace PixelFlow.View
             beltModel.OnTankEntered += _onTankEntered;
             beltModel.OnTankMoved += _onTankMoved;
             beltModel.OnTankLeft += _onTankLeft;
+            session.BeltShooting.OnOverflow += _onOverflow;
         }
 
         /// <summary>
@@ -490,11 +493,18 @@ namespace PixelFlow.View
                 _riders[_riderCount] = default;
             }
 
-            // A lap-completed tank is moved by the waiting-slot event that follows; a depleted one shrinks in place.
+            // A lap-completed tank is moved by the waiting-slot event that follows (or shrinks on overflow, see
+            // HandleOverflow); a depleted one shrinks in place.
             if (!lapCompleted)
                 StartDeplete(tank);
 
             UpdateCounter();
+        }
+
+        private void HandleOverflow(ColorTankModel tank)
+        {
+            // No waiting slot took the tank: shrink it where it left the belt and return it to the pool.
+            StartDeplete(tank);
         }
 
         private void StartDeplete(ColorTankModel tank)
@@ -530,6 +540,7 @@ namespace PixelFlow.View
             _session.Belt.OnTankEntered -= _onTankEntered;
             _session.Belt.OnTankMoved -= _onTankMoved;
             _session.Belt.OnTankLeft -= _onTankLeft;
+            _session.BeltShooting.OnOverflow -= _onOverflow;
         }
 
         private void EnsureInitialised()
@@ -544,6 +555,7 @@ namespace PixelFlow.View
             _onTankEntered = HandleTankEntered;
             _onTankMoved = HandleTankMoved;
             _onTankLeft = HandleTankLeft;
+            _onOverflow = HandleOverflow;
             _onDepleteFinished = HandleDepleteFinished;
 
             _pool = new ObjectPool<ColorTankView>(

@@ -95,6 +95,7 @@ namespace PixelFlow.Controller
         private float _tickTimer;
         private float _tickInterval;
         private int _currentIndex;
+        private GameState _result;
         private readonly Stopwatch _loadWatch = new Stopwatch();
 
         /// <summary>
@@ -102,6 +103,13 @@ namespace PixelFlow.Controller
         /// rules report them and no projectile, pending destroy or cell destroy animation is left.
         /// </summary>
         public GameState State { get; private set; }
+
+        /// <summary>
+        /// True between the moment the rules first report Won or Lost and the moment <see cref="State"/> takes that
+        /// result (once nothing is in flight any more). The result is latched: the belt no longer ticks and no
+        /// launch or tap is accepted.
+        /// </summary>
+        public bool IsResolving => State == GameState.Playing && _result != GameState.Playing;
 
         /// <summary>
         /// The session of the loaded level, or null before the first load.
@@ -249,7 +257,7 @@ namespace PixelFlow.Controller
             _currentData = data;
             _session = session;
             _layout = BoardLayout.Fit(_session.Width, _session.Height, boardArea);
-            var path = new BeltPath(_session.Width, _session.Height);
+            BeltPath path = _session.Belt.Path;
             _tickInterval = lapSeconds / path.Length;
             gridRenderer.Build(_session.Grid, _session.Palette, _layout);
             beltView.Build(path, _layout);
@@ -258,6 +266,7 @@ namespace PixelFlow.Controller
             hud.SetLevel(_currentIndex + 1);
             hud.HideAll();
             _tickTimer = 0f;
+            _result = GameState.Playing;
             State = GameState.Playing;
 
             _loadWatch.Stop();
@@ -272,10 +281,13 @@ namespace PixelFlow.Controller
         /// tank leaves its lane, so a rejected launch changes nothing.
         /// </summary>
         /// <param name="lane">Supply lane index.</param>
-        /// <returns>False if the game is not playing, the lane is invalid or empty, or the belt is full.</returns>
+        /// <returns>
+        /// False if the game is not playing or is resolving (see <see cref="IsResolving"/>),
+        /// the lane is invalid or empty, or the belt is full.
+        /// </returns>
         public bool TryLaunchFromLane(int lane)
         {
-            if (State != GameState.Playing || _session == null)
+            if (State != GameState.Playing || IsResolving || _session == null)
                 return false;
             if (lane < 0 || lane >= _session.Supply.LaneCount)
                 return false;
@@ -292,10 +304,13 @@ namespace PixelFlow.Controller
         /// checked before the tank leaves its slot, so a rejected launch changes nothing.
         /// </summary>
         /// <param name="slot">Waiting slot index (0 = leftmost).</param>
-        /// <returns>False if the game is not playing, the slot is empty or invalid, or the belt is full.</returns>
+        /// <returns>
+        /// False if the game is not playing or is resolving (see <see cref="IsResolving"/>),
+        /// the slot is empty or invalid, or the belt is full.
+        /// </returns>
         public bool TryLaunchFromSlot(int slot)
         {
-            if (State != GameState.Playing || _session == null)
+            if (State != GameState.Playing || IsResolving || _session == null)
                 return false;
             if (slot < 0 || slot >= _session.Tray.Count || _session.Belt.IsFull)
                 return false;
@@ -310,21 +325,33 @@ namespace PixelFlow.Controller
             if (State != GameState.Playing || _session == null)
                 return;
 
-            HandleInput();
-            RunBeltTimer(Time.deltaTime);
+            // Once the rules report a result it is latched: the belt stops and input is ignored while the
+            // projectiles, the destroy queue and the shrinking cells drain.
+            if (_result == GameState.Playing)
+            {
+                HandleInput();
+                RunBeltTimer(Time.deltaTime);
+                if (_result == GameState.Playing)
+                    _result = EvaluateRules();
+            }
+
             _destroyQueue.Process(destroysPerFrame, _handleDestroy);
 
-            GameState rules = GameRules.Evaluate(_session.Grid, _session.Belt, _session.Tray, _session.Supply,
-                _session.BeltShooting);
-            if (rules != GameState.Playing && projectiles.ActiveCount == 0 && _destroyQueue.Count == 0 &&
+            if (_result != GameState.Playing && projectiles.ActiveCount == 0 && _destroyQueue.Count == 0 &&
                 _activeCells.Count == 0)
             {
-                State = rules;
-                if (rules == GameState.Won)
+                State = _result;
+                if (_result == GameState.Won)
                     hud.ShowWin();
                 else
                     hud.ShowLose();
             }
+        }
+
+        private GameState EvaluateRules()
+        {
+            return GameRules.Evaluate(_session.Grid, _session.Belt, _session.Tray, _session.Supply,
+                _session.BeltShooting);
         }
 
         private void HandleInput()
@@ -362,6 +389,12 @@ namespace PixelFlow.Controller
                 _tickTimer -= _tickInterval;
                 ticks++;
                 Tick();
+
+                // Latch the result on the tick that produced it, so later catch-up ticks of this frame cannot
+                // change it (e.g. a lap overflowing after the board was cleared).
+                _result = EvaluateRules();
+                if (_result != GameState.Playing)
+                    return;
             }
 
             if (ticks == MaxTicksPerFrame && _tickTimer > _tickInterval)
