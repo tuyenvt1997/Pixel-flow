@@ -30,10 +30,10 @@ namespace PixelFlow.Tests
         // Below the profiler's 300-frame history, so the sampled frames plus the flush frames all stay in the buffer.
         private const int SampleFrames = 240;
         private const int FlushFrames = 5;
-        private const string FeedTrayMarkerName = "PixelFlow.Test.FeedTray";
+        private const string FeedBeltMarkerName = "PixelFlow.Test.FeedBelt";
 
         // Marks the tap-to-activate gameplay path driven from the test coroutine, so the GC check counts it as game code.
-        private static readonly ProfilerMarker s_feedTrayMarker = new ProfilerMarker(FeedTrayMarkerName);
+        private static readonly ProfilerMarker s_feedBeltMarker = new ProfilerMarker(FeedBeltMarkerName);
         private const double FrameBudgetMs = 1000.0 / 60.0;
 
         private ProfilerRecorder _gcAlloc;
@@ -140,7 +140,7 @@ namespace PixelFlow.Tests
                     framesSinceLap++;
                 else if (controller.Session.Tray.Count > 0)
                     framesSinceLap = 0;
-                FeedTray(controller);
+                FeedBelt(controller);
                 if (framesSinceDepletion >= 0)
                     framesSinceDepletion++;
                 else if (TanksLeft(controller.Session) < tanksAtStart)
@@ -163,7 +163,7 @@ namespace PixelFlow.Tests
             int startPixels = controller.Session.Grid.RemainingCount;
             for (int frame = 0; frame < SampleFrames && controller.State == GameState.Playing; frame++)
             {
-                FeedTray(controller);
+                FeedBelt(controller);
                 bool shooting = controller.Session.Belt.Count > 0 || controller.ActiveProjectiles > 0;
                 yield return null;
 
@@ -252,7 +252,7 @@ namespace PixelFlow.Tests
                     if (loopMs > maxPlayerLoopMs)
                         maxPlayerLoopMs = loopMs;
 
-                    if (ContainsMarker(view, playerLoop, FeedTrayMarkerName))
+                    if (ContainsMarker(view, playerLoop, FeedBeltMarkerName))
                         feedTrayFrames++;
                     double gameBytes = CollectAllocs(view, playerLoop, "PlayerLoop", f - firstFrame, allocByPath);
                     if (gameBytes > 0)
@@ -262,7 +262,7 @@ namespace PixelFlow.Tests
 
             report.Append($" Profiler hierarchy: {frames} frames (#{firstFrame}-#{lastFrame}); PlayerLoop avg ")
                 .Append($"{(frames > 0 ? totalPlayerLoopMs / frames : 0):F3} ms, max {maxPlayerLoopMs:F3} ms; ")
-                .Append($"game GC alloc in {gameAllocFrames} frames; FeedTray marker in {feedTrayFrames} frames.");
+                .Append($"game GC alloc in {gameAllocFrames} frames; FeedBelt marker in {feedTrayFrames} frames.");
             foreach (KeyValuePair<string, AllocSite> pair in allocByPath)
                 report.Append($"\n  GC alloc {pair.Value.Bytes:F0} B in {pair.Value.Frames} frames ")
                     .Append($"(sample #{pair.Value.First}-#{pair.Value.Last}) at {pair.Key}");
@@ -273,7 +273,7 @@ namespace PixelFlow.Tests
             int expectedFrames = lastFrame - firstFrame + 1;
             Assert.GreaterOrEqual(expectedFrames, SampleFrames, "Profiled range shorter than the sampled frames.");
             Assert.AreEqual(expectedFrames, frames, "Some sampled frames were missing from the profiler history.");
-            Assert.Greater(feedTrayFrames, 0, "FeedTray marker not found in the profiler hierarchy.");
+            Assert.Greater(feedTrayFrames, 0, "FeedBelt marker not found in the profiler hierarchy.");
             return gameAllocFrames;
         }
 
@@ -362,12 +362,12 @@ namespace PixelFlow.Tests
         /// <summary>
         /// True for PlayerLoop markers that run no game code: the test runner coroutine (this test's enumerator)
         /// and UnitySynchronizationContext tasks (async continuations of editor packages; the game has no async code).
-        /// Anything inside the <see cref="FeedTrayMarkerName"/> marker is the game's tap-to-activate path and always
+        /// Anything inside the <see cref="FeedBeltMarkerName"/> marker is the game's tap-to-activate path and always
         /// counts as game code, even though it runs inside the test coroutine.
         /// </summary>
         private static bool IsTestHarness(string path)
         {
-            if (path.Contains(FeedTrayMarkerName))
+            if (path.Contains(FeedBeltMarkerName))
                 return false;
             return path.Contains("PlaymodeTestsController") || path.Contains("PerformancePlayTests") ||
                    path.Contains("UnitySynchronizationContext");
@@ -407,15 +407,15 @@ namespace PixelFlow.Tests
         /// <summary>
         /// Keeps the belt busy with the <c>AutoPlayer</c> policy: if the belt has room, relaunches the first
         /// waiting-slot tank whose colour has a front, otherwise launches the lane-front tank with the smallest id.
-        /// Runs inside the <see cref="FeedTrayMarkerName"/> profiler marker so its allocations count as game code.
+        /// Runs inside the <see cref="FeedBeltMarkerName"/> profiler marker so its allocations count as game code.
         /// </summary>
-        private static void FeedTray(GameController controller)
+        private static void FeedBelt(GameController controller)
         {
-            using (s_feedTrayMarker.Auto())
-                FeedTrayCore(controller);
+            using (s_feedBeltMarker.Auto())
+                FeedBeltCore(controller);
         }
 
-        private static void FeedTrayCore(GameController controller)
+        private static void FeedBeltCore(GameController controller)
         {
             LevelSession s = controller.Session;
             if (s.Belt.IsFull)
