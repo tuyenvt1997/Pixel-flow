@@ -16,7 +16,7 @@ namespace PixelFlow.Core
         public PixelGridModel Grid { get; private set; }
 
         /// <summary>
-        /// The slot queue manager (player's tray).
+        /// The waiting slots (capacity <c>slotCount</c>): tanks that finished a belt lap with ammo left.
         /// </summary>
         public SlotQueueManager Tray { get; private set; }
 
@@ -24,11 +24,6 @@ namespace PixelFlow.Core
         /// The supply model (available tanks).
         /// </summary>
         public SupplyModel Supply { get; private set; }
-
-        /// <summary>
-        /// The shooting logic for this level.
-        /// </summary>
-        public ShootingLogic Shooting { get; private set; }
 
         /// <summary>
         /// The conveyor belt: capacity <c>slotCount</c>, path around the <c>width x height</c> board.
@@ -142,7 +137,6 @@ namespace PixelFlow.Core
             session.Grid = new PixelGridModel(data.width, data.height, data.cells);
             session.Tray = new SlotQueueManager(data.slotCount);
             session.Supply = new SupplyModel(tankModels, data.laneCount);
-            session.Shooting = new ShootingLogic(session.Grid, session.Tray);
             session.Belt = new BeltModel(data.slotCount, new BeltPath(data.width, data.height));
             session.BeltShooting = new BeltShootingLogic(session.Grid, session.Belt, session.Tray);
 

@@ -11,7 +11,7 @@ namespace PixelFlow.Tests
 {
     /// <summary>
     /// Stress tests on a procedural 100x50 (5000 cells) level: per-tick CPU time and steady-state allocations
-    /// of the conveyor-belt shooting loop, played by <see cref="BeltAutoPlayer"/>.
+    /// of the conveyor-belt shooting loop, played by <see cref="AutoPlayer"/>.
     /// </summary>
     public sealed class StressTests
     {
@@ -44,7 +44,7 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
-        /// Auto-plays the 5000-cell level to a win with <see cref="BeltAutoPlayer.Step"/>; the average time of one
+        /// Auto-plays the 5000-cell level to a win with <see cref="AutoPlayer.Step"/>; the average time of one
         /// bot tick (launch plus <see cref="BeltShootingLogic.Tick"/>) must be under 2 ms.
         /// </summary>
         [Test]
@@ -60,7 +60,7 @@ namespace PixelFlow.Tests
             for (int i = 0; i < MaxTicks && state == GameState.Playing; i++)
             {
                 long t0 = Stopwatch.GetTimestamp();
-                shotCount += BeltAutoPlayer.Step(s, shots);
+                shotCount += AutoPlayer.Step(s, shots);
                 tickTicks += Stopwatch.GetTimestamp() - t0;
                 tickCount++;
                 state = Evaluate(s);
@@ -121,11 +121,11 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
-        /// One auto-play tick: <see cref="BeltAutoPlayer.Step"/>, then the belt rules.
+        /// One auto-play tick: <see cref="AutoPlayer.Step"/>, then the belt rules.
         /// </summary>
         private static GameState PlayTick(LevelSession s, List<ShotEvent> shots)
         {
-            BeltAutoPlayer.Step(s, shots);
+            AutoPlayer.Step(s, shots);
             return Evaluate(s);
         }
 

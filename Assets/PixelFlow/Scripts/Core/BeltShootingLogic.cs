@@ -54,7 +54,7 @@ namespace PixelFlow.Core
                 if (_grid.TryGetFront(side, line, out Vector2Int cell) && _grid.GetCell(cell.x, cell.y) == tank.ColorId)
                 {
                     _grid.RemoveCell(cell);
-                    output.Add(ShotEvent.FromBelt(tank, position, cell, tank.ColorId));
+                    output.Add(new ShotEvent(tank, position, cell, tank.ColorId));
                     shots++;
                     tank.TryConsume();
                 }

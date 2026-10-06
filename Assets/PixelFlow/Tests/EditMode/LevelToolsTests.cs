@@ -156,7 +156,7 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
-        /// The 64x64 sample level has 4096 filled cells and the BeltAutoPlayer can win it under the conveyor-belt rules.
+        /// The 64x64 sample level has 4096 filled cells and the AutoPlayer can win it under the conveyor-belt rules.
         /// </summary>
         [Test]
         public void SampleLevel_Has4096Cells_AndIsSolvableByAutoPlayer()
@@ -175,7 +175,7 @@ namespace PixelFlow.Tests
                 Assert.AreEqual(3, level.laneCount);
                 Assert.AreEqual(5, level.slotCount);
 
-                Assert.AreEqual(GameState.Won, BeltAutoPlayer.Play(LevelSession.Create(level)));
+                Assert.AreEqual(GameState.Won, AutoPlayer.Play(LevelSession.Create(level)));
             }
             finally
             {

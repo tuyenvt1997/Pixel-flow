@@ -7,8 +7,8 @@ using UnityEngine;
 namespace PixelFlow.Tests
 {
     /// <summary>
-    /// Tests for the belt overload of <see cref="GameRules.Evaluate(PixelGridModel, BeltModel, SlotQueueManager, SupplyModel, BeltShootingLogic)"/>
-    /// and for <see cref="BeltAutoPlayer"/>.
+    /// Tests for <see cref="GameRules.Evaluate(PixelGridModel, BeltModel, SlotQueueManager, SupplyModel, BeltShootingLogic)"/>
+    /// and for <see cref="AutoPlayer"/>.
     /// </summary>
     public sealed class BeltRulesTests
     {
@@ -152,7 +152,7 @@ namespace PixelFlow.Tests
         /// The auto-player wins a small two-colour level.
         /// </summary>
         [Test]
-        public void BeltAutoPlayer_WinsSimpleLevel()
+        public void AutoPlayer_WinsSimpleLevel()
         {
             var tanks = new[]
             {
@@ -161,7 +161,7 @@ namespace PixelFlow.Tests
             };
             var s = CreateSession(new[] { "01", "10" }, tanks, lanes: 1, slots: 5);
 
-            Assert.AreEqual(GameState.Won, BeltAutoPlayer.Play(s));
+            Assert.AreEqual(GameState.Won, AutoPlayer.Play(s));
             Assert.AreEqual(0, s.Grid.RemainingCount);
         }
     }

@@ -6,8 +6,8 @@ using UnityEngine;
 namespace PixelFlow.Core
 {
     /// <summary>
-    /// Core board model for Pixel Flow game. Maintains grid state and provides O(1) operations
-    /// for querying exposed cells and removing them. Optimized for zero-allocation hot paths.
+    /// Core board model for Pixel Flow game. Maintains grid state and provides O(1) operations for querying the
+    /// front cell of every board side and line and for removing front cells. Optimized for zero-allocation hot paths.
     /// </summary>
     public sealed class PixelGridModel
     {
@@ -19,12 +19,6 @@ namespace PixelFlow.Core
         // Color tracking: Dictionary-backed lists for GetCellsOfColor
         private readonly Dictionary<int, List<Vector2Int>> _cellsByColor;
         private readonly int[] _indexInColorList; // Maps cell position to index in its color list
-
-        // Exposed cell tracking: O(1) lookup per column and per color
-        private readonly int[] _frontRow; // Y-coordinate of exposed cell per column (-1 if empty)
-        private readonly int[] _exposedColorInColumn; // Color ID of exposed cell per column (-1 if empty)
-        private readonly Dictionary<int, List<int>> _exposedColumnsByColor; // Columns where each color is exposed
-        private readonly int[] _columnIndexInExposedList; // Index of column in its color's exposed list
 
         // Four-sided front tracking for conveyor belt
         private readonly int[] _bottomFront; // Min Y per column (-1 if empty)
@@ -86,10 +80,6 @@ namespace PixelFlow.Core
             // Initialize data structures
             _cellsByColor = new Dictionary<int, List<Vector2Int>>();
             _indexInColorList = new int[width * height];
-            _frontRow = new int[width];
-            _exposedColorInColumn = new int[width];
-            _exposedColumnsByColor = new Dictionary<int, List<int>>();
-            _columnIndexInExposedList = new int[width];
 
             // Initialize four-sided front tracking
             _bottomFront = new int[width];
@@ -98,12 +88,9 @@ namespace PixelFlow.Core
             _rightFront = new int[height];
             _colorFrontCount = new int[256];
 
-            // Initialize front row and exposed tracking
+            // Initialize front pointers (-1 = empty line)
             for (int x = 0; x < width; x++)
             {
-                _frontRow[x] = -1;
-                _exposedColorInColumn[x] = -1;
-                _columnIndexInExposedList[x] = -1;
                 _bottomFront[x] = -1;
                 _topFront[x] = -1;
             }
@@ -137,39 +124,6 @@ namespace PixelFlow.Core
                         var pos = new Vector2Int(x, y);
                         _indexInColorList[index] = list.Count;
                         list.Add(pos);
-                    }
-                }
-            }
-
-            // Pre-size one exposed-column list per present color: a color is exposed in at most `width` columns,
-            // so RemoveCell never grows or creates a list (zero GC allocation while shooting).
-            foreach (var pair in _cellsByColor)
-            {
-                _exposedColumnsByColor[pair.Key] = new List<int>(width);
-            }
-
-            // Build front row (exposed cells per column)
-            for (int x = 0; x < width; x++)
-            {
-                // Find the bottommost non-empty cell in this column
-                for (int y = 0; y < height; y++)
-                {
-                    byte colorId = _cells[y * width + x];
-                    if (colorId != LevelData.EmptyCell)
-                    {
-                        _frontRow[x] = y;
-                        _exposedColorInColumn[x] = colorId;
-
-                        // Add this column to the exposed list for this color
-                        if (!_exposedColumnsByColor.TryGetValue(colorId, out var exposedColumns))
-                        {
-                            exposedColumns = new List<int>();
-                            _exposedColumnsByColor[colorId] = exposedColumns;
-                        }
-
-                        _columnIndexInExposedList[x] = exposedColumns.Count;
-                        exposedColumns.Add(x);
-                        break;
                     }
                 }
             }
@@ -272,38 +226,6 @@ namespace PixelFlow.Core
         }
 
         /// <summary>
-        /// Checks if the specified color has any exposed cells.
-        /// </summary>
-        /// <param name="colorId">The color ID to check.</param>
-        /// <returns>True if the color has at least one exposed cell.</returns>
-        public bool HasExposed(int colorId)
-        {
-            return _exposedColumnsByColor.TryGetValue(colorId, out var columns) && columns.Count > 0;
-        }
-
-        /// <summary>
-        /// Attempts to get an exposed cell of the specified color. O(1) and zero-allocation.
-        /// Returns the last element of the exposed set for determinism.
-        /// </summary>
-        /// <param name="colorId">The color ID to query.</param>
-        /// <param name="cell">Receives the cell position if found.</param>
-        /// <returns>True if an exposed cell was found, false otherwise.</returns>
-        public bool TryGetExposedCell(int colorId, out Vector2Int cell)
-        {
-            if (_exposedColumnsByColor.TryGetValue(colorId, out var columns) && columns.Count > 0)
-            {
-                // Return last element for determinism
-                int columnIndex = columns[columns.Count - 1];
-                int y = _frontRow[columnIndex];
-                cell = new Vector2Int(columnIndex, y);
-                return true;
-            }
-
-            cell = Vector2Int.zero;
-            return false;
-        }
-
-        /// <summary>
         /// Attempts to get the front cell for the specified board side and line.
         /// O(1) and zero-allocation.
         /// </summary>
@@ -368,8 +290,7 @@ namespace PixelFlow.Core
 
         /// <summary>
         /// Removes the specified cell from the grid. The cell must be a front from at least one side,
-        /// otherwise InvalidOperationException is thrown. Updates all front pointers, color counts,
-        /// and the legacy exposed-cell tracking.
+        /// otherwise InvalidOperationException is thrown. Updates all front pointers and color counts.
         /// </summary>
         /// <param name="cell">The cell position to remove.</param>
         /// <exception cref="InvalidOperationException">Thrown if the cell is not a front.</exception>
@@ -418,27 +339,6 @@ namespace PixelFlow.Core
 
             colorList.RemoveAt(lastListIndex);
 
-            // Update legacy bottom-exposed tracking if this cell was bottom-exposed
-            if (_frontRow[x] == y)
-            {
-                var exposedColumns = _exposedColumnsByColor[colorId];
-                int columnIndexInList = _columnIndexInExposedList[x];
-                int lastColumnIndex = exposedColumns.Count - 1;
-
-                if (columnIndexInList != lastColumnIndex)
-                {
-                    int lastColumn = exposedColumns[lastColumnIndex];
-                    exposedColumns[columnIndexInList] = lastColumn;
-                    _columnIndexInExposedList[lastColumn] = columnIndexInList;
-                }
-
-                exposedColumns.RemoveAt(lastColumnIndex);
-
-                _frontRow[x] = -1;
-                _exposedColorInColumn[x] = -1;
-                _columnIndexInExposedList[x] = -1;
-            }
-
             // Clear the cell
             _cells[index] = LevelData.EmptyCell;
             _remainingCount--;
@@ -460,19 +360,6 @@ namespace PixelFlow.Core
                     {
                         _bottomFront[x] = nextY;
                         _colorFrontCount[nextColorId]++;
-
-                        // Update legacy bottom-exposed tracking
-                        _frontRow[x] = nextY;
-                        _exposedColorInColumn[x] = nextColorId;
-
-                        if (!_exposedColumnsByColor.TryGetValue(nextColorId, out var newExposedColumns))
-                        {
-                            newExposedColumns = new List<int>();
-                            _exposedColumnsByColor[nextColorId] = newExposedColumns;
-                        }
-
-                        _columnIndexInExposedList[x] = newExposedColumns.Count;
-                        newExposedColumns.Add(x);
                         break;
                     }
                 }

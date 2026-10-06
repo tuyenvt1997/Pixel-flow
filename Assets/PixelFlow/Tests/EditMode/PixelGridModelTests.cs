@@ -69,11 +69,11 @@ namespace PixelFlow.Tests
         }
 
         [Test]
-        public void TryGetExposedCell_OnlyBottomMostCellPerColumnIsExposed()
+        public void BottomFront_IsLowestCellOfColumn()
         {
             // Arrange: 1x2 grid
             // rows[0] = top = "0"     → y=1
-            // rows[1] = bottom = "1"  → y=0 (exposed)
+            // rows[1] = bottom = "1"  → y=0 (bottom front)
             var level = TestLevels.Create(
                 new[] { "0", "1" },
                 new Color32[] { Color.red, Color.green },
@@ -82,13 +82,10 @@ namespace PixelFlow.Tests
             var model = new PixelGridModel(level.width, level.height, level.cells);
 
             // Act & Assert
-            Assert.IsTrue(model.HasExposed(1));
-            Assert.IsTrue(model.TryGetExposedCell(1, out var cell1));
-            Assert.AreEqual(new Vector2Int(0, 0), cell1);
-
-            Assert.IsFalse(model.HasExposed(0));
-            Assert.IsFalse(model.TryGetExposedCell(0, out var cell0));
-            Assert.AreEqual(Vector2Int.zero, cell0);
+            Assert.IsTrue(model.TryGetFront(BoardSide.Bottom, 0, out var bottom));
+            Assert.AreEqual(new Vector2Int(0, 0), bottom);
+            Assert.IsTrue(model.TryGetFront(BoardSide.Top, 0, out var top));
+            Assert.AreEqual(new Vector2Int(0, 1), top);
         }
 
         [Test]
@@ -96,7 +93,7 @@ namespace PixelFlow.Tests
         {
             // Arrange: 1x2 grid
             // rows[0] = top = "0"     → y=1
-            // rows[1] = bottom = "1"  → y=0 (exposed)
+            // rows[1] = bottom = "1"  → y=0 (bottom front)
             var level = TestLevels.Create(
                 new[] { "0", "1" },
                 new Color32[] { Color.red, Color.green },
@@ -104,13 +101,12 @@ namespace PixelFlow.Tests
             );
             var model = new PixelGridModel(level.width, level.height, level.cells);
 
-            // Act: Remove the exposed color 1 cell
+            // Act: Remove the bottom-front color 1 cell
             model.RemoveCell(new Vector2Int(0, 0));
 
-            // Assert: Color 0 at (0,1) should now be exposed
-            Assert.IsFalse(model.HasExposed(1));
-            Assert.IsTrue(model.HasExposed(0));
-            Assert.IsTrue(model.TryGetExposedCell(0, out var cell0));
+            // Assert: Color 0 at (0,1) should now be the bottom front
+            Assert.IsFalse(model.HasAnyFront(1));
+            Assert.IsTrue(model.TryGetFront(BoardSide.Bottom, 0, out var cell0));
             Assert.AreEqual(new Vector2Int(0, 1), cell0);
             Assert.AreEqual(1, model.RemainingCount);
         }
@@ -121,7 +117,7 @@ namespace PixelFlow.Tests
             // Arrange: 1x3 grid with gap
             // rows[0] = top = "0"     → y=2
             // rows[1] = middle = "."  → y=1 (empty)
-            // rows[2] = bottom = "1"  → y=0 (exposed)
+            // rows[2] = bottom = "1"  → y=0 (bottom front)
             var level = TestLevels.Create(
                 new[] { "0", ".", "1" },
                 new Color32[] { Color.red, Color.green },
@@ -129,18 +125,17 @@ namespace PixelFlow.Tests
             );
             var model = new PixelGridModel(level.width, level.height, level.cells);
 
-            // Act: Remove the exposed color 1 cell at (0,0)
+            // Act: Remove the bottom-front color 1 cell at (0,0)
             model.RemoveCell(new Vector2Int(0, 0));
 
-            // Assert: Should skip the gap and expose color 0 at (0,2)
-            Assert.IsTrue(model.HasExposed(0));
-            Assert.IsTrue(model.TryGetExposedCell(0, out var cell0));
+            // Assert: Should skip the gap and make color 0 at (0,2) the bottom front
+            Assert.IsTrue(model.TryGetFront(BoardSide.Bottom, 0, out var cell0));
             Assert.AreEqual(new Vector2Int(0, 2), cell0);
             Assert.AreEqual(1, model.RemainingCount);
         }
 
         [Test]
-        public void EmptyColumn_IsNeverExposed()
+        public void EmptyColumn_HasNoFront()
         {
             // Arrange: 2x2 grid with one empty column
             // rows[0] = top = ".1"     → y=1
@@ -152,13 +147,14 @@ namespace PixelFlow.Tests
             );
             var model = new PixelGridModel(level.width, level.height, level.cells);
 
-            // Assert: Color 1 should be exposed at column 1
-            Assert.IsTrue(model.HasExposed(1));
-            Assert.IsTrue(model.TryGetExposedCell(1, out var cell1));
+            // Assert: Column 1's bottom front is (1,0)
+            Assert.IsTrue(model.TryGetFront(BoardSide.Bottom, 1, out var cell1));
             Assert.AreEqual(new Vector2Int(1, 0), cell1);
 
-            // Column 0 is all empty, so no color should be exposed there
-            Assert.IsFalse(model.HasExposed(0));
+            // Column 0 is all empty, so it has no bottom or top front
+            Assert.IsFalse(model.TryGetFront(BoardSide.Bottom, 0, out _));
+            Assert.IsFalse(model.TryGetFront(BoardSide.Top, 0, out _));
+            Assert.IsFalse(model.HasAnyFront(0));
         }
 
         [Test]
@@ -213,45 +209,6 @@ namespace PixelFlow.Tests
             Assert.AreEqual(0, removedColorId);
             Assert.IsTrue(clearedRaised);
             Assert.AreEqual(0, model.RemainingCount);
-        }
-
-        [Test]
-        public void TryGetExposedCell_DoesNotAllocate()
-        {
-            // Arrange: Create a 64×64 grid with random colors
-            var random = new System.Random(42);
-            var rows = new string[64];
-            for (int i = 0; i < 64; i++)
-            {
-                var row = new char[64];
-                for (int j = 0; j < 64; j++)
-                {
-                    row[j] = (char)('0' + random.Next(0, 8));
-                }
-                rows[i] = new string(row);
-            }
-
-            var level = TestLevels.Create(
-                rows,
-                new Color32[] { Color.red, Color.green, Color.blue, Color.yellow, Color.cyan, Color.magenta, Color.white, Color.black },
-                new ColorTankData[0]
-            );
-            var model = new PixelGridModel(level.width, level.height, level.cells);
-
-            // Warm-up: Call a few times to ensure any lazy initialization is done
-            for (int i = 0; i < 10; i++)
-            {
-                model.TryGetExposedCell(i % 8, out _);
-            }
-
-            // Act & Assert: 10,000 calls should not allocate
-            AllocAssert.NoAlloc(() =>
-            {
-                for (int i = 0; i < 10000; i++)
-                {
-                    model.TryGetExposedCell(i % 8, out _);
-                }
-            });
         }
 
         [Test]
@@ -334,29 +291,6 @@ namespace PixelFlow.Tests
 
             // Assert
             Assert.AreEqual(LevelData.EmptyCell, model.GetCell(0, 0));
-        }
-
-        [Test]
-        public void RemoveCell_WithMultipleExposedCells_ReturnsDeterministic()
-        {
-            // Arrange: 3x1 grid, all exposed
-            // rows[0] = "012"  → y=0 (all exposed)
-            var level = TestLevels.Create(
-                new[] { "012" },
-                new Color32[] { Color.red, Color.green, Color.blue },
-                new ColorTankData[0]
-            );
-            var model = new PixelGridModel(level.width, level.height, level.cells);
-
-            // Act: Get exposed cell for each color multiple times
-            Assert.IsTrue(model.TryGetExposedCell(0, out var cell0a));
-            Assert.IsTrue(model.TryGetExposedCell(0, out var cell0b));
-            Assert.IsTrue(model.TryGetExposedCell(1, out var cell1a));
-            Assert.IsTrue(model.TryGetExposedCell(1, out var cell1b));
-
-            // Assert: Should return the same cell each time (deterministic)
-            Assert.AreEqual(cell0a, cell0b);
-            Assert.AreEqual(cell1a, cell1b);
         }
 
         private bool Contains(System.Collections.Generic.IReadOnlyList<Vector2Int> list, Vector2Int item)
