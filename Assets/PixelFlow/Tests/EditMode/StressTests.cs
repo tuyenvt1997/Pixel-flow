@@ -82,42 +82,47 @@ namespace PixelFlow.Tests
         /// allocates no GC memory until the level is won.
         /// </summary>
         /// <remarks>
-        /// <see cref="AllocAssert.NoAlloc"/> runs the action once unmeasured before the measured call. That first
-        /// run plays a separate warm-up session to the end and then switches the action to the measured session, so
-        /// the measured call still plays a full level (assigning a reference does not allocate).
+        /// <see cref="AllocAssert.NoAlloc"/> runs the action once unmeasured, then measures it up to
+        /// <see cref="AllocAssert.MaxAttempts"/> times. Every run plays its own pre-warmed session to the end (the
+        /// first one is the unmeasured warm-up), so each measured call plays a full level (indexing an array and
+        /// incrementing a counter do not allocate).
         /// </remarks>
         [Test]
         public void Stress_FullAutoPlay_NoAllocationInSteadyState()
         {
-            LevelSession warm = LevelSession.Create(_level);
-            LevelSession measured = LevelSession.Create(_level);
-            var shots = new List<ShotEvent>(measured.Belt.Capacity);
+            var sessions = new LevelSession[AllocAssert.MaxAttempts + 1];
+            for (int i = 0; i < sessions.Length; i++)
+                sessions[i] = LevelSession.Create(_level);
+            var shots = new List<ShotEvent>(sessions[0].Belt.Capacity);
 
             for (int i = 0; i < WarmupTicks; i++)
             {
-                PlayTick(warm, shots);
-                PlayTick(measured, shots);
+                for (int j = 0; j < sessions.Length; j++)
+                    PlayTick(sessions[j], shots);
             }
 
-            LevelSession current = warm;
-            GameState state = GameState.Playing;
-            int measuredRuns = 0;
+            int runs = 0;
+            var states = new GameState[sessions.Length];
             AllocAssert.NoAlloc(() =>
             {
+                LevelSession current = sessions[runs];
+                GameState state = GameState.Playing;
                 for (int i = 0; i < MaxTicks; i++)
                 {
                     state = PlayTick(current, shots);
                     if (state != GameState.Playing)
                         break;
                 }
-                if (current == measured)
-                    measuredRuns++;
-                current = measured;
+                states[runs] = state;
+                runs++;
             });
 
-            Assert.AreEqual(1, measuredRuns, "The measured session was not played exactly once.");
-            Assert.AreEqual(GameState.Won, state);
-            Assert.AreEqual(0, measured.Grid.RemainingCount);
+            Assert.GreaterOrEqual(runs, 2, "No measured session was played.");
+            for (int i = 0; i < runs; i++)
+            {
+                Assert.AreEqual(GameState.Won, states[i], $"Session {i} was not won.");
+                Assert.AreEqual(0, sessions[i].Grid.RemainingCount, $"Session {i} has pixels left.");
+            }
         }
 
         /// <summary>
