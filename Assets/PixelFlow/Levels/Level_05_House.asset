@@ -1,0 +1,97 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c6a923974fd630045ba73af73368f375, type: 3}
+  m_Name: Level_05_House
+  m_EditorClassIdentifier: 
+  width: 32
+  height: 32
+  palette:
+  - serializedVersion: 2
+    rgba: 4289978101
+  - serializedVersion: 2
+    rgba: 4280824503
+  - serializedVersion: 2
+    rgba: 4294628481
+  - serializedVersion: 2
+    rgba: 4282930553
+  - serializedVersion: 2
+    rgba: 4282884163
+  cells: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000003030303000000000000ffffffffff030303ffffffffffffffff00000000000003030303000000000000ffffffffff030303ffffffffffffffff00000000000003030303000000000000ffffffffff030303ffffffffffffffff00000000000003030303000000000000ffffffffff030303ffffffffffffffff00000000000003030303000000000000ffffffffff030303ffffffffffffffff00000000000003030303000000000000ffffffffff030303ffffffffffffffff00000000000003030303000000000000ffffffffff030303ffffffffffffffff00000202020000000000000202020000ffffffffff030303ffffffffffffffff00000202020000000000000202020000ffffffffff04040404ffffffffffffff00000202020000000000000202020000ffffff0404040404040404ffffffffff00000202020000000000000202020000ffff04040404040404040404ffffffff00000000000000000000000000000000ffff04040404040404040404ffffffff00000000000000000000000000000000ff040404040404040404040404ffff010101010101010101010101010101010101040404040404040404040404ffffff01010101010101010101010101010101ff040404040404040404040404ffffffff0101010101010101010101010101ffff040404040404040404040404ffffffffff010101010101010101010101ffffff040404040404040404040404ffffffffffff0101010101010101010101ffffffff04040404040404040404ffffffffffffffffff010101010101ff0101ffffffff04040404040404040404ffffffffffffffffffff01010101ffff0101ffffffffff0404040404040404ffffffffffffffffffffffff0101ffffff0101ffffffffffffff04040404ffffffffffffffffffffffffffffffffffffff0101ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0101ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+  tanks:
+  - colorId: 1
+    ammo: 15
+  - colorId: 0
+    ammo: 15
+  - colorId: 3
+    ammo: 15
+  - colorId: 4
+    ammo: 15
+  - colorId: 0
+    ammo: 15
+  - colorId: 4
+    ammo: 15
+  - colorId: 3
+    ammo: 15
+  - colorId: 0
+    ammo: 15
+  - colorId: 0
+    ammo: 15
+  - colorId: 4
+    ammo: 15
+  - colorId: 3
+    ammo: 15
+  - colorId: 0
+    ammo: 15
+  - colorId: 4
+    ammo: 15
+  - colorId: 0
+    ammo: 15
+  - colorId: 3
+    ammo: 7
+  - colorId: 2
+    ammo: 15
+  - colorId: 0
+    ammo: 15
+  - colorId: 4
+    ammo: 15
+  - colorId: 4
+    ammo: 15
+  - colorId: 0
+    ammo: 15
+  - colorId: 2
+    ammo: 9
+  - colorId: 0
+    ammo: 15
+  - colorId: 4
+    ammo: 15
+  - colorId: 0
+    ammo: 15
+  - colorId: 0
+    ammo: 6
+  - colorId: 1
+    ammo: 15
+  - colorId: 1
+    ammo: 15
+  - colorId: 4
+    ammo: 15
+  - colorId: 1
+    ammo: 15
+  - colorId: 1
+    ammo: 15
+  - colorId: 1
+    ammo: 15
+  - colorId: 4
+    ammo: 4
+  - colorId: 1
+    ammo: 3
+  laneCount: 3
+  slotCount: 5

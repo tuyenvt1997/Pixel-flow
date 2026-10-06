@@ -12,7 +12,7 @@ namespace PixelFlow.Tests
     /// </summary>
     public class PixelGridRendererTests
     {
-        private const string Level001Path = "Assets/PixelFlow/Levels/Level_001.asset";
+        private const string SunLevelPath = PixelFlow.EditorTools.SampleLevelFactory.AssetPath;
 
         private GameObject _go;
         private GameObject _cubePrimitive;
@@ -44,10 +44,10 @@ namespace PixelFlow.Tests
         };
 
         [Test]
-        public void Build_Level001_Uses5Batches()
+        public void Build_SunLevel_Uses5Batches()
         {
-            var level = AssetDatabase.LoadAssetAtPath<LevelData>(Level001Path);
-            Assert.IsNotNull(level, "Level_001 asset missing");
+            var level = AssetDatabase.LoadAssetAtPath<LevelData>(SunLevelPath);
+            Assert.IsNotNull(level, "Sun level asset (Level_06_Sun) missing");
             var session = LevelSession.Create(level);
 
             _renderer.Build(session.Grid, session.Palette, BoardLayout.Fit(level.width, level.height, new Rect(-5f, -5f, 10f, 10f)));
@@ -94,7 +94,7 @@ namespace PixelFlow.Tests
         [Test]
         public void Build_Twice_ReusesArrays_WhenLargeEnough()
         {
-            var level = AssetDatabase.LoadAssetAtPath<LevelData>(Level001Path);
+            var level = AssetDatabase.LoadAssetAtPath<LevelData>(SunLevelPath);
             var session = LevelSession.Create(level);
             var layout = BoardLayout.Fit(level.width, level.height, new Rect(-5f, -5f, 10f, 10f));
             _renderer.Build(session.Grid, session.Palette, layout);

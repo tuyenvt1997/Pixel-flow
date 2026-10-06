@@ -6,14 +6,23 @@ using UnityEngine;
 namespace PixelFlow.EditorTools
 {
     /// <summary>
-    /// Builds the procedural 64x64 sample level (a sun over green ground) and saves it as an asset.
+    /// Builds the procedural 64x64 sample level (a sun over green ground) and saves it as an asset. It is the
+    /// last level of the game, after the starter levels of <see cref="StarterLevelFactory"/>.
     /// </summary>
     public static class SampleLevelFactory
     {
         /// <summary>
-        /// Project path of the generated sample level asset.
+        /// Project path of the generated sample (sun) level asset.
         /// </summary>
-        public const string AssetPath = "Assets/PixelFlow/Levels/Level_001.asset";
+        public const string AssetPath = "Assets/PixelFlow/Levels/Level_06_Sun.asset";
+
+        /// <summary>
+        /// Former path of the sun level; an asset found there is moved to <see cref="AssetPath"/> (GUID kept).
+        /// </summary>
+        public const string LegacyAssetPath = "Assets/PixelFlow/Levels/Level_001.asset";
+
+        private const string LevelFolder = "Assets/PixelFlow/Levels";
+        private const string AssetName = "Level_06_Sun";
 
         private const int Size = 64;
         private const int GroundRows = 12;
@@ -61,7 +70,7 @@ namespace PixelFlow.EditorTools
             }
 
             var level = ScriptableObject.CreateInstance<LevelData>();
-            level.name = "Level_001";
+            level.name = AssetName;
             level.width = Size;
             level.height = Size;
             level.palette = new Color32[]
@@ -82,19 +91,57 @@ namespace PixelFlow.EditorTools
         /// <summary>
         /// Menu command: generates the sample level and writes it to <see cref="AssetPath"/>,
         /// creating the folder if needed and overwriting an existing asset in place (its GUID is kept).
+        /// A sun level still at <see cref="LegacyAssetPath"/> is moved to <see cref="AssetPath"/> first.
         /// Public so it can be run via <c>-executeMethod</c>.
         /// </summary>
         [MenuItem("PixelFlow/Create Sample Level")]
         public static void CreateAsset()
         {
-            if (!AssetDatabase.IsValidFolder("Assets/PixelFlow/Levels"))
+            EnsureLevelFolder();
+            MigrateLegacyAsset();
+
+            LevelData level = Create64();
+            LevelData saved = SaveOrReplace(level, AssetPath);
+            if (saved.name != AssetName)
+            {
+                saved.name = AssetName;
+                EditorUtility.SetDirty(saved);
+                AssetDatabase.SaveAssets();
+            }
+            Debug.Log($"[PixelFlow] Sample level saved to {AssetPath}: {saved.width}x{saved.height}, {saved.palette.Length} colors, {saved.tanks.Length} tanks.");
+        }
+
+        /// <summary>
+        /// Creates the <c>Assets/PixelFlow/Levels</c> folder if it does not exist.
+        /// </summary>
+        internal static void EnsureLevelFolder()
+        {
+            if (!AssetDatabase.IsValidFolder(LevelFolder))
             {
                 AssetDatabase.CreateFolder("Assets/PixelFlow", "Levels");
             }
+        }
 
-            LevelData level = Create64();
-            SaveOrReplace(level, AssetPath);
-            Debug.Log($"[PixelFlow] Sample level saved to {AssetPath}: {level.width}x{level.height}, {level.palette.Length} colors, {level.tanks.Length} tanks.");
+        /// <summary>
+        /// Moves the sun level from <see cref="LegacyAssetPath"/> to <see cref="AssetPath"/> with
+        /// <see cref="AssetDatabase.MoveAsset"/> so its GUID (and every scene reference to it) is kept.
+        /// Does nothing if there is no legacy asset or the new path is already taken.
+        /// </summary>
+        internal static void MigrateLegacyAsset()
+        {
+            if (AssetDatabase.LoadMainAssetAtPath(LegacyAssetPath) == null ||
+                AssetDatabase.LoadMainAssetAtPath(AssetPath) != null)
+            {
+                return;
+            }
+
+            string error = AssetDatabase.MoveAsset(LegacyAssetPath, AssetPath);
+            if (!string.IsNullOrEmpty(error))
+            {
+                Debug.LogError($"[PixelFlow] Could not move {LegacyAssetPath} to {AssetPath}: {error}");
+                return;
+            }
+            Debug.Log($"[PixelFlow] Moved {LegacyAssetPath} to {AssetPath}.");
         }
 
         /// <summary>

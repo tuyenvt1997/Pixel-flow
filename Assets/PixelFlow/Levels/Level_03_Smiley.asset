@@ -1,0 +1,71 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c6a923974fd630045ba73af73368f375, type: 3}
+  m_Name: Level_03_Smiley
+  m_EditorClassIdentifier: 
+  width: 16
+  height: 16
+  palette:
+  - serializedVersion: 2
+    rgba: 4279554815
+  - serializedVersion: 2
+    rgba: 4279774282
+  - serializedVersion: 2
+    rgba: 4288053503
+  - serializedVersion: 2
+    rgba: 4294967295
+  cells: ffffffffffffffffffffffffffffffffffffffffff010101010101ffffffffffffffff01010000000000000101ffffffffff010000000000000000000001ffffff0100000000010101010000000001ffff0100000001000000000100000001ff0100000001000000000000010000000101000202000000000000000002020001010000000000000000000000000000010100000001010000000001010000000101000000010100000000010100000001ff0100000103000000000103000001ffff0100000000000000000000000001ffffff010000000000000000000001ffffffffff01010000000000000101ffffffffffffffff010101010101ffffffffff
+  tanks:
+  - colorId: 1
+    ammo: 10
+  - colorId: 1
+    ammo: 10
+  - colorId: 0
+    ammo: 10
+  - colorId: 0
+    ammo: 10
+  - colorId: 1
+    ammo: 10
+  - colorId: 0
+    ammo: 10
+  - colorId: 0
+    ammo: 10
+  - colorId: 2
+    ammo: 4
+  - colorId: 1
+    ammo: 10
+  - colorId: 0
+    ammo: 10
+  - colorId: 0
+    ammo: 10
+  - colorId: 0
+    ammo: 10
+  - colorId: 0
+    ammo: 10
+  - colorId: 0
+    ammo: 10
+  - colorId: 1
+    ammo: 10
+  - colorId: 0
+    ammo: 10
+  - colorId: 3
+    ammo: 2
+  - colorId: 0
+    ammo: 10
+  - colorId: 0
+    ammo: 10
+  - colorId: 1
+    ammo: 10
+  - colorId: 0
+    ammo: 6
+  laneCount: 3
+  slotCount: 5

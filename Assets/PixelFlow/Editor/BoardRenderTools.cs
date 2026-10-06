@@ -10,7 +10,7 @@ namespace PixelFlow.EditorTools
 {
     /// <summary>
     /// Editor utilities for the instanced board: creates the board material and renders an offscreen
-    /// capture of Level_001 for visual checks in batch mode (run without -nographics).
+    /// capture of the sun level (Level_06_Sun) for visual checks in batch mode (run without -nographics).
     /// </summary>
     public static class BoardRenderTools
     {
@@ -58,18 +58,18 @@ namespace PixelFlow.EditorTools
         }
 
         /// <summary>
-        /// Builds Level_001 with a temporary <see cref="PixelGridRenderer"/>, renders it through a temporary
+        /// Builds the sun level (Level_06_Sun) with a temporary <see cref="PixelGridRenderer"/>, renders it through a temporary
         /// orthographic camera (looking down +Z) into a RenderTexture and writes <see cref="CapturePath"/>.
         /// Hides the bottom-left 8x8 cells to make HideCell visible in the capture.
         /// </summary>
-        [MenuItem("PixelFlow/Capture Level_001 Board")]
+        [MenuItem("PixelFlow/Capture Sun Level Board")]
         public static void CaptureLevel001()
         {
             var level = AssetDatabase.LoadAssetAtPath<LevelData>(SampleLevelFactory.AssetPath);
             var material = AssetDatabase.LoadAssetAtPath<Material>(MaterialPath);
             if (level == null || material == null)
             {
-                Debug.LogError("[BoardRenderTools] Level_001 or board material missing.");
+                Debug.LogError("[BoardRenderTools] Sun level or board material missing.");
                 return;
             }
 
