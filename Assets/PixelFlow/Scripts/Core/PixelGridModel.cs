@@ -197,11 +197,7 @@ namespace PixelFlow.Core
                     if (colorId != LevelData.EmptyCell)
                     {
                         _topFront[x] = y;
-                        // Only increment if this is a different cell than bottom front
-                        if (_topFront[x] != _bottomFront[x])
-                        {
-                            _colorFrontCount[colorId]++;
-                        }
+                        _colorFrontCount[colorId]++;
                         break;
                     }
                 }
@@ -217,13 +213,7 @@ namespace PixelFlow.Core
                     if (colorId != LevelData.EmptyCell)
                     {
                         _leftFront[y] = x;
-                        // Check if this cell is already counted as a front
-                        Vector2Int cell = new Vector2Int(x, y);
-                        bool alreadyCounted = (_bottomFront[x] == y) || (_topFront[x] == y);
-                        if (!alreadyCounted)
-                        {
-                            _colorFrontCount[colorId]++;
-                        }
+                        _colorFrontCount[colorId]++;
                         break;
                     }
                 }
@@ -235,12 +225,7 @@ namespace PixelFlow.Core
                     if (colorId != LevelData.EmptyCell)
                     {
                         _rightFront[y] = x;
-                        // Only increment if this is a different cell than the other fronts
-                        bool alreadyCounted = (_bottomFront[x] == y) || (_topFront[x] == y) || (_leftFront[y] == x);
-                        if (!alreadyCounted)
-                        {
-                            _colorFrontCount[colorId]++;
-                        }
+                        _colorFrontCount[colorId]++;
                         break;
                     }
                 }
@@ -460,9 +445,9 @@ namespace PixelFlow.Core
 
             // Decrement color front count for each front this cell was part of
             if (isBottomFront) _colorFrontCount[colorId]--;
-            if (isTopFront && !isBottomFront) _colorFrontCount[colorId]--;
-            if (isLeftFront && !isBottomFront && !isTopFront) _colorFrontCount[colorId]--;
-            if (isRightFront && !isBottomFront && !isTopFront && !isLeftFront) _colorFrontCount[colorId]--;
+            if (isTopFront) _colorFrontCount[colorId]--;
+            if (isLeftFront) _colorFrontCount[colorId]--;
+            if (isRightFront) _colorFrontCount[colorId]--;
 
             // Update bottom front if needed
             if (isBottomFront)
@@ -503,11 +488,7 @@ namespace PixelFlow.Core
                     if (nextColorId != LevelData.EmptyCell)
                     {
                         _topFront[x] = nextY;
-                        // Only increment if different from bottom front
-                        if (_bottomFront[x] != nextY)
-                        {
-                            _colorFrontCount[nextColorId]++;
-                        }
+                        _colorFrontCount[nextColorId]++;
                         break;
                     }
                 }
@@ -523,12 +504,7 @@ namespace PixelFlow.Core
                     if (nextColorId != LevelData.EmptyCell)
                     {
                         _leftFront[y] = nextX;
-                        // Only increment if not already counted as bottom or top front
-                        bool alreadyCounted = (_bottomFront[nextX] == y) || (_topFront[nextX] == y);
-                        if (!alreadyCounted)
-                        {
-                            _colorFrontCount[nextColorId]++;
-                        }
+                        _colorFrontCount[nextColorId]++;
                         break;
                     }
                 }
@@ -544,12 +520,7 @@ namespace PixelFlow.Core
                     if (nextColorId != LevelData.EmptyCell)
                     {
                         _rightFront[y] = nextX;
-                        // Only increment if not already counted as any other front
-                        bool alreadyCounted = (_bottomFront[nextX] == y) || (_topFront[nextX] == y) || (_leftFront[y] == nextX);
-                        if (!alreadyCounted)
-                        {
-                            _colorFrontCount[nextColorId]++;
-                        }
+                        _colorFrontCount[nextColorId]++;
                         break;
                     }
                 }

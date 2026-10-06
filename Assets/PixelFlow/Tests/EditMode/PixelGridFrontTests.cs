@@ -144,22 +144,75 @@ namespace PixelFlow.Tests
         }
 
         [Test]
-        public void RemoveCell_NotAFront_Throws()
+        public void HasAnyFront_FalseOnceColourCleared_AnyRemovalOrder()
         {
-            // Arrange: 3x3 grid fully filled
-            // rows[0] = top = "000"
-            // rows[1] = middle = "010"
-            // rows[2] = bottom = "000"
-            var level = TestLevels.Create(
-                new[] { "000", "010", "000" },
+            // Test 1: 1x2 column - remove in bottom-to-top order
+            var level1 = TestLevels.Create(
+                new[] { "0", "1" },
                 new Color32[] { Color.red, Color.green },
                 new ColorTankData[0]
             );
-            var model = new PixelGridModel(level.width, level.height, level.cells);
+            var model1 = new PixelGridModel(level1.width, level1.height, level1.cells);
 
-            // Act & Assert: Removing center cell (1,1) should throw
-            var ex = Assert.Throws<InvalidOperationException>(() => model.RemoveCell(new Vector2Int(1, 1)));
-            Assert.That(ex.Message, Does.Contain("not").And.Contains("front"));
+            Assert.IsTrue(model1.HasAnyFront(1));
+            Assert.IsTrue(model1.HasAnyFront(0));
+
+            model1.RemoveCell(new Vector2Int(0, 0)); // bottom front, color 1
+            Assert.IsFalse(model1.HasAnyFront(1)); // color 1 cleared
+            Assert.IsTrue(model1.HasAnyFront(0));
+
+            model1.RemoveCell(new Vector2Int(0, 1)); // top front, color 0
+            Assert.IsFalse(model1.HasAnyFront(0)); // color 0 cleared
+
+            // Test 2: 2x3 grid - remove in mixed order
+            // rows[0] = top = "00"    → y=2
+            // rows[1] = middle = "01" → y=1
+            // rows[2] = bottom = "00" → y=0
+            var level2 = TestLevels.Create(
+                new[] { "00", "01", "00" },
+                new Color32[] { Color.red, Color.green },
+                new ColorTankData[0]
+            );
+            var model2 = new PixelGridModel(level2.width, level2.height, level2.cells);
+
+            Assert.IsTrue(model2.HasAnyFront(0));
+            Assert.IsTrue(model2.HasAnyFront(1));
+
+            // Remove right front (1,1) - color 1
+            model2.RemoveCell(new Vector2Int(1, 1));
+            Assert.IsFalse(model2.HasAnyFront(1)); // color 1 cleared
+            Assert.IsTrue(model2.HasAnyFront(0));
+
+            // Remove remaining color 0 cells
+            model2.RemoveCell(new Vector2Int(0, 0)); // bottom-left
+            Assert.IsTrue(model2.HasAnyFront(0)); // still has fronts
+
+            model2.RemoveCell(new Vector2Int(1, 0)); // bottom-right
+            Assert.IsTrue(model2.HasAnyFront(0)); // still has fronts
+
+            model2.RemoveCell(new Vector2Int(0, 1)); // left front
+            Assert.IsTrue(model2.HasAnyFront(0)); // still has fronts
+
+            model2.RemoveCell(new Vector2Int(0, 2)); // left-top
+            Assert.IsTrue(model2.HasAnyFront(0)); // still has fronts
+
+            model2.RemoveCell(new Vector2Int(1, 2)); // top-right
+            Assert.IsFalse(model2.HasAnyFront(0)); // color 0 cleared
+
+            // Test 3: 1x2 column - remove in top-to-bottom order
+            var level3 = TestLevels.Create(
+                new[] { "0", "1" },
+                new Color32[] { Color.red, Color.green },
+                new ColorTankData[0]
+            );
+            var model3 = new PixelGridModel(level3.width, level3.height, level3.cells);
+
+            model3.RemoveCell(new Vector2Int(0, 1)); // top front, color 0
+            Assert.IsFalse(model3.HasAnyFront(0));
+            Assert.IsTrue(model3.HasAnyFront(1));
+
+            model3.RemoveCell(new Vector2Int(0, 0)); // bottom front, color 1
+            Assert.IsFalse(model3.HasAnyFront(1));
         }
 
         [Test]
