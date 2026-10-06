@@ -73,7 +73,7 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
-        /// Plays Level_001 with the tray kept busy, warms up (at least 60 frames and one complete
+        /// Plays the 64x64 sun level (the last level) with the tray kept busy, warms up (at least 60 frames and one complete
         /// tank depletion), then samples 240 frames while shooting, with game time fixed at 1/60 s per frame:
         /// <list type="bullet">
         /// <item>GC allocation: the profiler hierarchy (main thread, "PlayerLoop" subtree, i.e. the Hierarchy view's
@@ -100,6 +100,10 @@ namespace PixelFlow.Tests
             Assert.IsNotNull(controller, "GameController missing from Game scene.");
             Assert.IsNotNull(grid, "PixelGridRenderer missing from Game scene.");
             Assert.IsNotNull(controller.Session, "No level loaded on start.");
+
+            // Stress the biggest level: the 64x64 sun level is the last one.
+            controller.LoadLevel(controller.LevelCount - 1);
+            Assert.AreEqual(64 * 64, controller.Session.Grid.RemainingCount, "Last level is not the 64x64 sun level.");
 
             // Measure the work per frame rather than the 60 FPS wait.
             // captureDeltaTime keeps the simulation at 60 FPS game time, so shooting runs as on device.

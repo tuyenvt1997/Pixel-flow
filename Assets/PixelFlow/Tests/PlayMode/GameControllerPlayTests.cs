@@ -19,13 +19,22 @@ using UnityEditor.SceneManagement;
 namespace PixelFlow.Tests
 {
     /// <summary>
-    /// End-to-end tests of the generated Game scene: auto-play to a win, a forced loss, retry while projectiles
-    /// are in flight, and the level load time budget.
+    /// End-to-end tests of the generated Game scene: auto-play to a win (starter level 1 and the sun level), cycling
+    /// through all levels with Next, a forced loss, retry while projectiles are in flight, and the level load time budget.
     /// </summary>
     public sealed class GameControllerPlayTests
     {
         private const string ScenePath = "Assets/PixelFlow/Scenes/Game.unity";
-        private const int Level001Cells = 64 * 64;
+        private const int SunCells = 64 * 64;
+
+        /// <summary>Number of levels in the Game scene: five starter levels followed by the sun level.</summary>
+        private const int LevelCount = 6;
+
+        /// <summary>Index of the 64x64 sun level (the last level).</summary>
+        private const int SunIndex = 5;
+
+        /// <summary>Board size (width = height) of each level in play order.</summary>
+        private static readonly int[] LevelSizes = { 8, 12, 16, 24, 32, 64 };
 
         private const string BoardShaderName = "PixelFlow/InstancedColor";
 
@@ -155,6 +164,7 @@ namespace PixelFlow.Tests
         public IEnumerator LoadLevel_InvalidData_LeavesPreviousLevelPlayable()
         {
             yield return LoadGameScene();
+            _controller.LoadLevel(SunIndex);
             TankBoardView board = Object.FindFirstObjectByType<TankBoardView>();
             LevelSession before = _controller.Session;
             int views = board.ActiveViewCount;
@@ -165,13 +175,13 @@ namespace PixelFlow.Tests
 
             Assert.AreSame(before, _controller.Session, "Session replaced by a failed load.");
             Assert.AreEqual(GameState.Playing, _controller.State);
-            Assert.AreEqual(0, _controller.CurrentLevelIndex);
-            Assert.AreEqual(Level001Cells, _grid.InstanceCount, "Board cleared by a failed load.");
+            Assert.AreEqual(SunIndex, _controller.CurrentLevelIndex);
+            Assert.AreEqual(SunCells, _grid.InstanceCount, "Board cleared by a failed load.");
             Assert.AreEqual(views, board.ActiveViewCount, "Tank views cleared by a failed load.");
 
             Assert.IsTrue(_controller.TryActivateLane(0), "Previous level no longer playable.");
             float start = Time.realtimeSinceStartup;
-            while (_controller.Session.Grid.RemainingCount == Level001Cells)
+            while (_controller.Session.Grid.RemainingCount == SunCells)
             {
                 Assert.Less(Time.realtimeSinceStartup - start, 5f, "No pixel destroyed after the failed load.");
                 yield return null;
@@ -204,28 +214,96 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
-        /// Plays Level_001 with the "smallest lane-front id first" strategy until it is won, and writes a
-        /// mid-game capture of the game camera to Logs/game_capture.png.
+        /// Starter level 1 (the 8x8 heart, loaded on scene start) is won with the "smallest lane-front id first"
+        /// strategy, and a mid-game capture of the game camera is written to Logs/level1_capture.png.
         /// </summary>
         [UnityTest]
-        public IEnumerator Level001_AutoPlay_ReachesWon()
+        public IEnumerator Level1_AutoPlay_ReachesWon()
         {
             yield return LoadGameScene();
+            Assert.AreEqual(0, _controller.CurrentLevelIndex);
+            Assert.AreEqual(LevelSizes[0], _controller.Session.Width);
+            int cells = _controller.Session.Grid.RemainingCount;
+            Assert.AreEqual(CountPixels(_controller.CurrentLevel), cells);
+            Assert.Less(cells, 64, "Level 1 should have few pixels.");
+
+            float start = Time.realtimeSinceStartup;
+            bool captured = false;
+            while (_controller.State == GameState.Playing)
+            {
+                Assert.Less(Time.realtimeSinceStartup - start, 60f, "Level 1 was not won within 60 s.");
+
+                LevelSession s = _controller.Session;
+                if (!s.Shooting.CanAnyTankFire() && !s.Tray.IsFull)
+                    _controller.TryActivateLane(SmallestFrontLane(s));
+
+                if (!captured && s.Grid.RemainingCount < cells * 3 / 4 && _controller.ActiveProjectiles > 0)
+                {
+                    CaptureCamera("level1_capture.png");
+                    captured = true;
+                }
+
+                yield return null;
+            }
+
+            Assert.AreEqual(GameState.Won, _controller.State);
+            Assert.AreEqual(0, _controller.Session.Grid.RemainingCount);
+            Assert.IsTrue(captured, "No mid-game capture was taken.");
+            Assert.IsTrue(Panel("WinPanel").activeSelf, "Win popup not shown.");
+            Debug.Log($"[PlayTests] Level 1 won in {Time.realtimeSinceStartup - start:F1} s real time.");
+        }
+
+        /// <summary>
+        /// The Next button walks through all six levels in order and wraps around: the level index goes
+        /// 0, 1, ..., 5, 0 and each time the board holds exactly that level's non-empty pixels.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Next_CyclesThroughAllSixLevels()
+        {
+            yield return LoadGameScene();
+            Assert.AreEqual(LevelCount, _controller.LevelCount, "Game scene level count.");
+            Assert.AreEqual(0, _controller.CurrentLevelIndex);
+            Button next = NextButton();
+
+            for (int step = 1; step <= LevelCount; step++)
+            {
+                next.onClick.Invoke();
+                int expected = step % LevelCount;
+                Assert.AreEqual(expected, _controller.CurrentLevelIndex, $"Index after Next #{step}.");
+                Assert.AreEqual(GameState.Playing, _controller.State);
+                Assert.AreEqual(LevelSizes[expected], _controller.Session.Width, $"Width of level {expected}.");
+                int pixels = CountPixels(_controller.CurrentLevel);
+                Assert.AreEqual(pixels, _grid.InstanceCount, $"Board instances of level {expected}.");
+                Assert.AreEqual(pixels, _controller.Session.Grid.RemainingCount);
+                yield return null;
+            }
+        }
+
+        /// <summary>
+        /// Plays the 64x64 sun level (the last level) with the "smallest lane-front id first" strategy until it is
+        /// won, and writes a mid-game capture of the game camera to Logs/game_capture.png.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator SunLevel_AutoPlay_ReachesWon()
+        {
+            yield return LoadGameScene();
+            _controller.LoadLevel(SunIndex);
+            Assert.AreEqual(SunCells, _controller.Session.Grid.RemainingCount);
             Time.timeScale = 8f;
 
             float start = Time.realtimeSinceStartup;
             bool captured = false;
             while (_controller.State == GameState.Playing)
             {
-                Assert.Less(Time.realtimeSinceStartup - start, 180f, "Level_001 was not won within 180 s.");
+                Assert.Less(Time.realtimeSinceStartup - start, 180f, "The sun level was not won within 180 s.");
 
                 LevelSession s = _controller.Session;
                 if (!s.Shooting.CanAnyTankFire() && !s.Tray.IsFull)
                     _controller.TryActivateLane(SmallestFrontLane(s));
 
-                if (!captured && s.Grid.RemainingCount < Level001Cells * 3 / 4 && _controller.ActiveProjectiles > 0)
+                if (!captured && s.Grid.RemainingCount < SunCells * 3 / 4 && _controller.ActiveProjectiles > 0)
                 {
-                    CaptureCamera();
+                    CaptureCamera("game_capture.png");
                     captured = true;
                 }
 
@@ -236,7 +314,7 @@ namespace PixelFlow.Tests
             Assert.AreEqual(0, _controller.Session.Grid.RemainingCount);
             Assert.IsTrue(Panel("WinPanel").activeSelf, "Win popup not shown.");
             Assert.IsFalse(Panel("LosePanel").activeSelf, "Lose popup shown on a win.");
-            Debug.Log($"[PlayTests] Level_001 won in {Time.realtimeSinceStartup - start:F1} s real time.");
+            Debug.Log($"[PlayTests] Sun level won in {Time.realtimeSinceStartup - start:F1} s real time.");
         }
 
         /// <summary>
@@ -282,12 +360,13 @@ namespace PixelFlow.Tests
         public IEnumerator Retry_MidFlight_ClearsProjectilesAndQueue()
         {
             yield return LoadGameScene();
+            _controller.LoadLevel(SunIndex);
 
             for (int lane = 0; lane < 3; lane++)
                 Assert.IsTrue(_controller.TryActivateLane(lane));
 
             float start = Time.realtimeSinceStartup;
-            while (_controller.ActiveProjectiles == 0 || _controller.Session.Grid.RemainingCount > Level001Cells - 20)
+            while (_controller.ActiveProjectiles == 0 || _controller.Session.Grid.RemainingCount > SunCells - 20)
             {
                 Assert.Less(Time.realtimeSinceStartup - start, 10f, "No projectiles in flight.");
                 yield return null;
@@ -298,8 +377,8 @@ namespace PixelFlow.Tests
 
             Assert.AreEqual(0, _controller.ActiveProjectiles);
             Assert.AreEqual(0, _controller.PendingDestroys);
-            Assert.AreEqual(Level001Cells, _grid.InstanceCount);
-            Assert.AreEqual(Level001Cells, _controller.Session.Grid.RemainingCount);
+            Assert.AreEqual(SunCells, _grid.InstanceCount);
+            Assert.AreEqual(SunCells, _controller.Session.Grid.RemainingCount);
             Assert.AreEqual(0, _controller.Session.Tray.Count);
 
             for (int i = 0; i < 30; i++)
@@ -307,7 +386,7 @@ namespace PixelFlow.Tests
 
             Assert.AreEqual(0, _controller.ActiveProjectiles);
             Assert.AreEqual(0, _controller.PendingDestroys);
-            Assert.AreEqual(Level001Cells, _controller.Session.Grid.RemainingCount);
+            Assert.AreEqual(SunCells, _controller.Session.Grid.RemainingCount);
             for (int y = 0; y < 64; y++)
             {
                 for (int x = 0; x < 64; x++)
@@ -322,18 +401,22 @@ namespace PixelFlow.Tests
         }
 
         /// <summary>
-        /// Level_001 loads (model + board + tanks + HUD) in well under a second, both on scene start and on reload.
+        /// Levels load (model + board + tanks + HUD) in well under a second: level 1 on scene start, and the 64x64
+        /// sun level both on its first load and on reload.
         /// </summary>
         [UnityTest]
         public IEnumerator LevelLoad_Under1000ms()
         {
             yield return LoadGameScene();
-            double first = _controller.LastLoadMilliseconds;
+            double onStart = _controller.LastLoadMilliseconds;
 
-            _controller.LoadLevel(0);
+            _controller.LoadLevel(SunIndex);
+            double first = _controller.LastLoadMilliseconds;
+            _controller.LoadLevel(SunIndex);
             double reload = _controller.LastLoadMilliseconds;
 
-            Debug.Log($"[PlayTests] Level_001 load: first {first:F2} ms, reload {reload:F2} ms.");
+            Debug.Log($"[PlayTests] Load: level 1 on start {onStart:F2} ms, sun level first {first:F2} ms, reload {reload:F2} ms.");
+            Assert.Less(onStart, 1000.0);
             Assert.Less(first, 1000.0);
             Assert.Less(reload, 1000.0);
             yield return null;
@@ -423,6 +506,25 @@ namespace PixelFlow.Tests
             return t.gameObject;
         }
 
+        private Button NextButton()
+        {
+            Transform t = _hud.transform.Find("WinPanel/NextButton");
+            Assert.IsNotNull(t, "Next button missing.");
+            return t.GetComponent<Button>();
+        }
+
+        private static int CountPixels(LevelData level)
+        {
+            Assert.IsNotNull(level, "No current level data.");
+            int n = 0;
+            foreach (byte c in level.cells)
+            {
+                if (c != LevelData.EmptyCell)
+                    n++;
+            }
+            return n;
+        }
+
         private Button RetryButton()
         {
             Transform t = _hud.transform.Find("LosePanel/RetryButton");
@@ -467,7 +569,7 @@ namespace PixelFlow.Tests
             return level;
         }
 
-        private void CaptureCamera()
+        private void CaptureCamera(string fileName)
         {
             const int width = 540;
             const int height = 960;
@@ -493,7 +595,7 @@ namespace PixelFlow.Tests
                 tex.Apply();
                 RenderTexture.active = previousActive;
 
-                string path = Path.Combine(Application.dataPath, "..", "Logs", "game_capture.png");
+                string path = Path.Combine(Application.dataPath, "..", "Logs", fileName);
                 File.WriteAllBytes(path, tex.EncodeToPNG());
                 Object.Destroy(tex);
                 Debug.Log($"[PlayTests] Wrote {Path.GetFullPath(path)}.");

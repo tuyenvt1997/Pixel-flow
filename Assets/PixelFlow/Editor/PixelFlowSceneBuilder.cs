@@ -82,11 +82,20 @@ namespace PixelFlow.EditorTools
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
             var font = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(FontPath);
-            var level = AssetDatabase.LoadAssetAtPath<LevelData>(SampleLevelFactory.AssetPath);
-            var boardMaterial = AssetDatabase.LoadAssetAtPath<Material>(BoardRenderTools.MaterialPath);
-            if (font == null || level == null || boardMaterial == null)
+            var levels = new LevelData[StarterLevelFactory.AssetPaths.Length];
+            string missingLevel = null;
+            for (int i = 0; i < levels.Length; i++)
             {
-                Debug.LogError($"[PixelFlowSceneBuilder] Missing input asset (font: {font != null}, level: {level != null}, board material: {boardMaterial != null}).");
+                levels[i] = AssetDatabase.LoadAssetAtPath<LevelData>(StarterLevelFactory.AssetPaths[i]);
+                if (levels[i] == null && missingLevel == null)
+                    missingLevel = StarterLevelFactory.AssetPaths[i];
+            }
+            var boardMaterial = AssetDatabase.LoadAssetAtPath<Material>(BoardRenderTools.MaterialPath);
+            if (font == null || missingLevel != null || boardMaterial == null)
+            {
+                Debug.LogError($"[PixelFlowSceneBuilder] Missing input asset (font: {font != null}, " +
+                               $"first missing level: {missingLevel ?? "none"} - run PixelFlow/Create Levels, " +
+                               $"board material: {boardMaterial != null}).");
                 return;
             }
 
@@ -104,7 +113,7 @@ namespace PixelFlow.EditorTools
             Transform projectilePrefab = BuildProjectilePrefab(viewMaterial);
             DebrisFx debrisPrefab = BuildDebrisPrefab(particleMaterial);
 
-            BuildScene(scene, level, boardMaterial, font, cellPrefab, tankPrefab, projectilePrefab, debrisPrefab);
+            BuildScene(scene, levels, boardMaterial, font, cellPrefab, tankPrefab, projectilePrefab, debrisPrefab);
             AddSceneToBuildSettings();
             AssetDatabase.SaveAssets();
             Debug.Log($"[PixelFlowSceneBuilder] Built {ScenePath} and prefabs in {PrefabFolder}.");
@@ -248,7 +257,7 @@ namespace PixelFlow.EditorTools
             return SavePrefab<DebrisFx>(go, "Debris.prefab");
         }
 
-        private static void BuildScene(Scene scene, LevelData level, Material boardMaterial, TMP_FontAsset font,
+        private static void BuildScene(Scene scene, LevelData[] levelAssets, Material boardMaterial, TMP_FontAsset font,
             PixelCellView cellPrefab, ColorTankView tankPrefab, Transform projectilePrefab, DebrisFx debrisPrefab)
         {
             // Camera: orthographic portrait view of the XY plane, looking down +Z.
@@ -307,8 +316,9 @@ namespace PixelFlow.EditorTools
             var controller = controllerGo.AddComponent<GameController>();
             var ctrlSo = new SerializedObject(controller);
             SerializedProperty levels = ctrlSo.FindProperty("levels");
-            levels.arraySize = 1;
-            levels.GetArrayElementAtIndex(0).objectReferenceValue = level;
+            levels.arraySize = levelAssets.Length;
+            for (int i = 0; i < levelAssets.Length; i++)
+                levels.GetArrayElementAtIndex(i).objectReferenceValue = levelAssets[i];
             ctrlSo.FindProperty("gridRenderer").objectReferenceValue = grid;
             ctrlSo.FindProperty("tankBoard").objectReferenceValue = tankBoard;
             ctrlSo.FindProperty("projectiles").objectReferenceValue = projectiles;

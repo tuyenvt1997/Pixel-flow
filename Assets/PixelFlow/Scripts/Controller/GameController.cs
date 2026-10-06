@@ -109,6 +109,17 @@ namespace PixelFlow.Controller
         public int CurrentLevelIndex => _currentIndex;
 
         /// <summary>
+        /// Number of levels in the levels array (0 if none are assigned).
+        /// </summary>
+        public int LevelCount => levels != null ? levels.Length : 0;
+
+        /// <summary>
+        /// The level data of the loaded level (the asset or the runtime instance passed to
+        /// <see cref="LoadLevel(LevelData)"/>), or null before the first load.
+        /// </summary>
+        public LevelData CurrentLevel => _currentData;
+
+        /// <summary>
         /// Number of projectiles currently in flight.
         /// </summary>
         public int ActiveProjectiles => projectiles != null ? projectiles.ActiveCount : 0;
