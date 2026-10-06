@@ -15,7 +15,7 @@ namespace PixelFlow.View
     public sealed class ColorTankView : MonoBehaviour
     {
         /// <summary>
-        /// Default duration in seconds of the scale-down played when a tank leaves the tray.
+        /// Default duration in seconds of the scale-down played when a tank runs out of ammo.
         /// </summary>
         public const float DefaultDepleteDuration = 0.15f;
 
@@ -37,6 +37,7 @@ namespace PixelFlow.View
 
         private Action<ColorTankModel, int> _onAmmoChanged;
         private Vector3 _baseScale = Vector3.one;
+        private float _scaleFactor = 1f;
 
         private bool _moving;
         private Vector3 _moveFrom;
@@ -145,7 +146,20 @@ namespace PixelFlow.View
             _moving = false;
             _depleting = false;
             _onDepleteFinished = null;
+            _scaleFactor = 1f;
             transform.localScale = _baseScale;
+        }
+
+        /// <summary>
+        /// Scales the view to <paramref name="factor"/> times its prefab scale (e.g. smaller while riding the belt).
+        /// <see cref="PlayDeplete"/> shrinks from this scale; <see cref="Unbind"/> restores factor 1.
+        /// </summary>
+        /// <param name="factor">Scale relative to the prefab scale.</param>
+        public void SetScale(float factor)
+        {
+            _scaleFactor = factor;
+            if (!_depleting)
+                transform.localScale = _baseScale * factor;
         }
 
         /// <summary>
@@ -232,7 +246,7 @@ namespace PixelFlow.View
             {
                 _depleteElapsed += dt;
                 float k = _depleteElapsed >= _depleteDuration ? 1f : _depleteElapsed / _depleteDuration;
-                transform.localScale = _baseScale * (1f - k * k);
+                transform.localScale = _baseScale * (_scaleFactor * (1f - k * k));
                 if (k >= 1f)
                     FinishDeplete();
             }

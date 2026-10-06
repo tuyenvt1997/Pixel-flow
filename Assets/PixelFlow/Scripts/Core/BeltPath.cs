@@ -12,6 +12,16 @@ namespace PixelFlow.Core
         private readonly int _height;
 
         /// <summary>
+        /// Width of the board the belt runs around (number of columns).
+        /// </summary>
+        public int Width => _width;
+
+        /// <summary>
+        /// Height of the board the belt runs around (number of rows).
+        /// </summary>
+        public int Height => _height;
+
+        /// <summary>
         /// Total number of positions on the belt path.
         /// </summary>
         public int Length { get; }
