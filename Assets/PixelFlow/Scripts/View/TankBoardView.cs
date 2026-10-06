@@ -71,7 +71,8 @@ namespace PixelFlow.View
         [Tooltip("Tank view prefab. Instantiated only by the pool factory.")]
         [SerializeField] private ColorTankView tankPrefab;
 
-        [Tooltip("Empty waiting-slot frame (no collider). One is shown per waiting slot.")]
+        [Tooltip("Empty waiting-slot frame (no collider): a SpriteRenderer (tinted via its colour) or a mesh " +
+                 "(tinted via _BaseColor). One is shown per waiting slot.")]
         [SerializeField] private Transform slotFramePrefab;
 
         [Tooltip("Colour of the empty waiting-slot frames.")]
@@ -372,7 +373,11 @@ namespace PixelFlow.View
             while (_slotFrames.Count < count)
             {
                 Transform frame = Instantiate(slotFramePrefab, transform);
-                if (frame.TryGetComponent(out Renderer renderer))
+                // Sprite frames are tinted through the sprite colour (a property block would fight the sprite's
+                // own texture binding); mesh frames through _BaseColor.
+                if (frame.TryGetComponent(out SpriteRenderer sprite))
+                    sprite.color = slotFrameColor;
+                else if (frame.TryGetComponent(out Renderer renderer))
                     renderer.SetPropertyBlock(_frameProps);
                 _slotFrames.Add(frame);
             }

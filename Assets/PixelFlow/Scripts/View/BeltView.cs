@@ -13,7 +13,8 @@ namespace PixelFlow.View
     /// <para>Belt position <c>p</c> sits on the track centreline next to its line (spec §1): bottom positions
     /// under their column, right positions beside their row, and so on. Between the last position of an edge and the
     /// first of the next, the path passes through the track's corner point instead of cutting diagonally.</para>
-    /// The track and chevrons are one mesh with two sub-meshes, rebuilt by <see cref="Build"/> (level load only).
+    /// The track, chevrons, track rims and the board well (the darker panel inside the track) are one mesh with four
+    /// sub-meshes, rebuilt by <see cref="Build"/> (level load only).
     /// Nothing allocates per frame.
     /// </summary>
     public sealed class BeltView : MonoBehaviour
@@ -21,10 +22,13 @@ namespace PixelFlow.View
         private const int CornerSegments = 8;
         private const float TrackDepth = 0.6f;
         private const float ChevronDepth = 0.58f;
+        private const float RimDepth = 0.59f;
+        private const float WellDepth = 0.62f;
 
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
 
-        [Tooltip("Renders the track (material 0) and the chevrons (material 1).")]
+        [Tooltip("Renders the track (material 0), the chevrons (material 1), the track rims (material 2) and the " +
+                 "board well (material 3). Sub-meshes without a material are not drawn.")]
         [SerializeField] private MeshRenderer trackRenderer;
 
         [Tooltip("Mesh filter of the track renderer; its mesh is generated at runtime.")]
@@ -47,9 +51,21 @@ namespace PixelFlow.View
         [Tooltip("Chevron colour.")]
         [SerializeField] private Color chevronColor = new Color(0.55f, 0.6f, 0.85f, 1f);
 
+        [Tooltip("Colour of the thin rims along the inner and outer edges of the track.")]
+        [SerializeField] private Color rimColor = new Color(0.66f, 0.68f, 0.92f, 1f);
+
+        [Tooltip("Colour of the board well: the panel filling the inside of the track behind the board.")]
+        [SerializeField] private Color wellColor = new Color(0.18f, 0.18f, 0.31f, 1f);
+
+        [Tooltip("Width of each track rim as a fraction of the track width.")]
+        [Range(0f, 0.4f)]
+        [SerializeField] private float rimFraction = 0.1f;
+
         private readonly List<Vector3> _vertices = new List<Vector3>(256);
         private readonly List<int> _trackTriangles = new List<int>(512);
         private readonly List<int> _chevronTriangles = new List<int>(512);
+        private readonly List<int> _rimTriangles = new List<int>(512);
+        private readonly List<int> _wellTriangles = new List<int>(256);
 
         private Mesh _mesh;
         private MaterialPropertyBlock _props;
@@ -109,6 +125,17 @@ namespace PixelFlow.View
                 trackRenderer.SetPropertyBlock(_props, 0);
                 _props.SetColor(BaseColorId, chevronColor);
                 trackRenderer.SetPropertyBlock(_props, 1);
+                int materialCount = trackRenderer.sharedMaterials.Length; // level load only
+                if (materialCount > 2)
+                {
+                    _props.SetColor(BaseColorId, rimColor);
+                    trackRenderer.SetPropertyBlock(_props, 2);
+                }
+                if (materialCount > 3)
+                {
+                    _props.SetColor(BaseColorId, wellColor);
+                    trackRenderer.SetPropertyBlock(_props, 3);
+                }
                 trackRenderer.enabled = true;
             }
 
@@ -267,61 +294,120 @@ namespace PixelFlow.View
             _vertices.Clear();
             _trackTriangles.Clear();
             _chevronTriangles.Clear();
+            _rimTriangles.Clear();
+            _wellTriangles.Clear();
 
             AddTrackBand();
+            AddWell();
             AddChevrons(new Vector3(_left, _bottom), new Vector3(_right, _bottom), Vector3.right);
             AddChevrons(new Vector3(_right, _bottom), new Vector3(_right, _top), Vector3.up);
             AddChevrons(new Vector3(_right, _top), new Vector3(_left, _top), Vector3.left);
             AddChevrons(new Vector3(_left, _top), new Vector3(_left, _bottom), Vector3.down);
 
             _mesh.Clear();
-            _mesh.subMeshCount = 2;
+            _mesh.subMeshCount = 4;
             _mesh.SetVertices(_vertices);
             _mesh.SetTriangles(_trackTriangles, 0);
             _mesh.SetTriangles(_chevronTriangles, 1);
+            _mesh.SetTriangles(_rimTriangles, 2);
+            _mesh.SetTriangles(_wellTriangles, 3);
             _mesh.RecalculateBounds();
         }
 
         /// <summary>
-        /// Adds the rounded-rectangle band: an inner and an outer outline (corner arcs sharing a centre) joined by
-        /// quads. Triangles are emitted for both windings so the band is visible regardless of culling.
+        /// Adds the rounded-rectangle band (an inner and an outer outline whose corner arcs share a centre, joined by
+        /// quads) to sub-mesh 0, and the thin inner and outer rims along its edges to sub-mesh 2.
+        /// Triangles are emitted for both windings so the band is visible regardless of culling.
         /// </summary>
         private void AddTrackBand()
         {
-            float hw = trackWidth * 0.5f;
             float innerRadius = trackWidth * 0.2f;
             float outerRadius = innerRadius + trackWidth;
-            float inset = hw + innerRadius;
-
-            // Arc centres of the four corners in counter-clockwise order, starting bottom-right.
-            Vector2[] centres =
+            float rim = trackWidth * rimFraction;
+            AddRing(innerRadius, outerRadius, TrackDepth, _trackTriangles);
+            if (rim > 0f)
             {
-                new Vector2(_right - inset, _bottom + inset),
-                new Vector2(_right - inset, _top - inset),
-                new Vector2(_left + inset, _top - inset),
-                new Vector2(_left + inset, _bottom + inset),
-            };
+                AddRing(innerRadius, innerRadius + rim, RimDepth, _rimTriangles);
+                AddRing(outerRadius - rim, outerRadius, RimDepth, _rimTriangles);
+            }
+        }
 
+        /// <summary>
+        /// Arc centre of corner <paramref name="c"/> (counter-clockwise, starting bottom-right), shared by the track
+        /// outlines, the rims and the well.
+        /// </summary>
+        private Vector2 CornerCentre(int c)
+        {
+            float inset = trackWidth * 0.5f + trackWidth * 0.2f;
+            switch (c)
+            {
+                case 0: return new Vector2(_right - inset, _bottom + inset);
+                case 1: return new Vector2(_right - inset, _top - inset);
+                case 2: return new Vector2(_left + inset, _top - inset);
+                default: return new Vector2(_left + inset, _bottom + inset);
+            }
+        }
+
+        private static Vector2 CornerDirection(int c, int s)
+        {
+            float angle = (-90f + 90f * c + 90f * s / CornerSegments) * Mathf.Deg2Rad;
+            return new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+        }
+
+        /// <summary>
+        /// Adds a closed rounded-rectangle ring between the radii <paramref name="innerRadius"/> and
+        /// <paramref name="outerRadius"/> around the corner centres to <paramref name="triangles"/>.
+        /// </summary>
+        private void AddRing(float innerRadius, float outerRadius, float depth, List<int> triangles)
+        {
             int start = _vertices.Count;
             int ringPoints = 4 * (CornerSegments + 1);
             for (int c = 0; c < 4; c++)
             {
-                float baseAngle = -90f + 90f * c;
+                Vector2 centre = CornerCentre(c);
                 for (int s = 0; s <= CornerSegments; s++)
                 {
-                    float angle = (baseAngle + 90f * s / CornerSegments) * Mathf.Deg2Rad;
-                    var dir = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
-                    Vector2 inner = centres[c] + dir * innerRadius;
-                    Vector2 outer = centres[c] + dir * outerRadius;
-                    _vertices.Add(new Vector3(inner.x, inner.y, TrackDepth));
-                    _vertices.Add(new Vector3(outer.x, outer.y, TrackDepth));
+                    Vector2 dir = CornerDirection(c, s);
+                    Vector2 inner = centre + dir * innerRadius;
+                    Vector2 outer = centre + dir * outerRadius;
+                    _vertices.Add(new Vector3(inner.x, inner.y, depth));
+                    _vertices.Add(new Vector3(outer.x, outer.y, depth));
                 }
             }
 
             for (int i = 0; i < ringPoints; i++)
             {
                 int j = (i + 1) % ringPoints;
-                AddQuad(_trackTriangles, start + 2 * i, start + 2 * i + 1, start + 2 * j + 1, start + 2 * j);
+                AddQuad(triangles, start + 2 * i, start + 2 * i + 1, start + 2 * j + 1, start + 2 * j);
+            }
+        }
+
+        /// <summary>
+        /// Adds the board well to sub-mesh 3: a rounded rectangle filling the inside of the track (its outline is the
+        /// track's inner edge), built as a fan around the board centre, behind the board.
+        /// </summary>
+        private void AddWell()
+        {
+            float innerRadius = trackWidth * 0.2f;
+            int centre = _vertices.Count;
+            _vertices.Add(new Vector3((_left + _right) * 0.5f, (_bottom + _top) * 0.5f, WellDepth));
+            int start = _vertices.Count;
+            int ringPoints = 4 * (CornerSegments + 1);
+            for (int c = 0; c < 4; c++)
+            {
+                Vector2 corner = CornerCentre(c);
+                for (int s = 0; s <= CornerSegments; s++)
+                {
+                    Vector2 p = corner + CornerDirection(c, s) * innerRadius;
+                    _vertices.Add(new Vector3(p.x, p.y, WellDepth));
+                }
+            }
+
+            for (int i = 0; i < ringPoints; i++)
+            {
+                int j = (i + 1) % ringPoints;
+                _wellTriangles.Add(centre); _wellTriangles.Add(start + i); _wellTriangles.Add(start + j);
+                _wellTriangles.Add(centre); _wellTriangles.Add(start + j); _wellTriangles.Add(start + i);
             }
         }
 
