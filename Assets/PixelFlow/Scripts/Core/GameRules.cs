@@ -57,5 +57,38 @@ namespace PixelFlow.Core
             // Otherwise, still playing
             return GameState.Playing;
         }
+
+        /// <summary>
+        /// Evaluates the game state under the conveyor-belt rules.
+        /// Won: no pixels remain.
+        /// Lost: a tank overflowed the waiting slots, or the supply, belt and entrance queue are all empty and no
+        /// waiting-slot tank's colour is on any front (this includes empty waiting slots).
+        /// Playing: otherwise. Allocation-free.
+        /// </summary>
+        /// <param name="grid">The pixel grid model.</param>
+        /// <param name="belt">The belt model (riding and queued tanks).</param>
+        /// <param name="slots">The waiting slots.</param>
+        /// <param name="supply">The supply model.</param>
+        /// <param name="shooting">The belt shooting logic (overflow latch and waiting-tank check).</param>
+        /// <returns>The current game state.</returns>
+        public static GameState Evaluate(PixelGridModel grid, BeltModel belt, SlotQueueManager slots, SupplyModel supply, BeltShootingLogic shooting)
+        {
+            if (grid.RemainingCount == 0)
+            {
+                return GameState.Won;
+            }
+
+            if (shooting.Overflowed)
+            {
+                return GameState.Lost;
+            }
+
+            if (supply.IsEmpty && belt.Count == 0 && belt.QueuedCount == 0 && !shooting.CanAnyWaitingTankHit())
+            {
+                return GameState.Lost;
+            }
+
+            return GameState.Playing;
+        }
     }
 }

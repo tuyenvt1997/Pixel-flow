@@ -31,6 +31,16 @@ namespace PixelFlow.Core
         public ShootingLogic Shooting { get; private set; }
 
         /// <summary>
+        /// The conveyor belt: capacity <c>slotCount</c>, path around the <c>width x height</c> board.
+        /// </summary>
+        public BeltModel Belt { get; private set; }
+
+        /// <summary>
+        /// The belt shooting logic for this level. It uses <see cref="Tray"/> as the waiting slots.
+        /// </summary>
+        public BeltShootingLogic BeltShooting { get; private set; }
+
+        /// <summary>
         /// The color palette for this level.
         /// </summary>
         public Color32[] Palette { get; private set; }
@@ -133,6 +143,8 @@ namespace PixelFlow.Core
             session.Tray = new SlotQueueManager(data.slotCount);
             session.Supply = new SupplyModel(tankModels, data.laneCount);
             session.Shooting = new ShootingLogic(session.Grid, session.Tray);
+            session.Belt = new BeltModel(data.slotCount, new BeltPath(data.width, data.height));
+            session.BeltShooting = new BeltShootingLogic(session.Grid, session.Belt, session.Tray);
 
             return session;
         }

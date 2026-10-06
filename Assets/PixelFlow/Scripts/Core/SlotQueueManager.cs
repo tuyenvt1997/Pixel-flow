@@ -104,6 +104,26 @@ namespace PixelFlow.Core
         }
 
         /// <summary>
+        /// Removes the specified tank from the slots and shifts the tanks after it one slot left.
+        /// Raises <see cref="OnTankRemoved"/> with the tank's old index.
+        /// </summary>
+        /// <param name="tank">The tank to remove.</param>
+        /// <returns>True if the tank was removed; false if it is not in the slots.</returns>
+        public bool TryRemove(ColorTankModel tank)
+        {
+            int index = _tanks.IndexOf(tank);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            tank.OnDepleted -= _onTankDepletedHandler;
+            _tanks.RemoveAt(index);
+            OnTankRemoved?.Invoke(tank, index);
+            return true;
+        }
+
+        /// <summary>
         /// Handles automatic removal of depleted tanks.
         /// Called via event subscription when a tank depletes.
         /// </summary>
