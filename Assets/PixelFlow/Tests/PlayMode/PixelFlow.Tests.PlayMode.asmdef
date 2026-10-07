@@ -6,6 +6,7 @@
         "PixelFlow.Core",
         "PixelFlow.Performance",
         "PixelFlow.View",
+        "PixelFlow.Meta",
         "PixelFlow.Controller",
         "UnityEngine.UI",
         "Unity.InputSystem",

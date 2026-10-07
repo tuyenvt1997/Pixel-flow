@@ -1,7 +1,7 @@
-using System.Collections.Generic;
 using System.IO;
 using PixelFlow.Controller;
 using PixelFlow.Data;
+using PixelFlow.Meta;
 using PixelFlow.View;
 using TMPro;
 using UnityEditor;
@@ -16,8 +16,9 @@ namespace PixelFlow.EditorTools
 {
     /// <summary>
     /// Generates the playable game: view materials, the PixelCell / ColorTank / SlotFrame / Projectile / Debris prefabs and
-    /// <c>Assets/PixelFlow/Scenes/Game.unity</c> with every serialized reference assigned, then puts the scene at
-    /// Build Settings index 0. Rerunning overwrites the generated assets in place (asset GUIDs are kept).
+    /// <c>Assets/PixelFlow/Scenes/Game.unity</c> with every serialized reference assigned, then applies the Build
+    /// Settings order Loading, Menu, Game (<see cref="MetaUiBuilder.ApplyBuildSettingsOrder"/>). Rerunning overwrites the
+    /// generated assets in place (asset GUIDs are kept).
     /// </summary>
     public static class PixelFlowSceneBuilder
     {
@@ -186,7 +187,7 @@ namespace PixelFlow.EditorTools
             };
             BuildScene(scene, levels, boardMaterial, viewMaterial, font, cellPrefab, tankPrefab, slotFramePrefab,
                 projectilePrefab, debrisPrefab, hudAssets);
-            AddSceneToBuildSettings();
+            MetaUiBuilder.ApplyBuildSettingsOrder();
             AssetDatabase.SaveAssets();
             Debug.Log($"[PixelFlowSceneBuilder] Built {ScenePath} and prefabs in {PrefabFolder}.");
         }
@@ -557,7 +558,7 @@ namespace PixelFlow.EditorTools
             var debris = ((GameObject)PrefabUtility.InstantiatePrefab(debrisPrefab.gameObject, scene)).GetComponent<DebrisFx>();
 
             // HUD + EventSystem.
-            GameHudView hud = BuildHud(hudAssets);
+            GameHudView hud = BuildHud(hudAssets, out SettingsPopup settingsPopup);
             var eventSystemGo = new GameObject("EventSystem");
             eventSystemGo.AddComponent<EventSystem>();
             eventSystemGo.AddComponent<InputSystemUIInputModule>().AssignDefaultActions();
@@ -576,6 +577,7 @@ namespace PixelFlow.EditorTools
             ctrlSo.FindProperty("cellViewPrefab").objectReferenceValue = cellPrefab;
             ctrlSo.FindProperty("debris").objectReferenceValue = debris;
             ctrlSo.FindProperty("hud").objectReferenceValue = hud;
+            ctrlSo.FindProperty("settingsPopup").objectReferenceValue = settingsPopup;
             ctrlSo.FindProperty("cam").objectReferenceValue = cam;
             ctrlSo.FindProperty("boardArea").rectValue = BoardArea;
             ctrlSo.FindProperty("beltView").objectReferenceValue = belt;
@@ -586,7 +588,7 @@ namespace PixelFlow.EditorTools
             EditorSceneManager.SaveScene(scene, ScenePath);
         }
 
-        private static GameHudView BuildHud(HudAssets assets)
+        private static GameHudView BuildHud(HudAssets assets, out SettingsPopup settingsPopup)
         {
             var canvasGo = new GameObject("HUD", typeof(RectTransform));
             var canvas = canvasGo.AddComponent<Canvas>();
@@ -597,7 +599,7 @@ namespace PixelFlow.EditorTools
             scaler.matchWidthOrHeight = 0.5f;
             canvasGo.AddComponent<GraphicRaycaster>();
 
-            // "Level N" on the pack's glossy blue pill at the top centre (no settings gear, no coin bar).
+            // "Level N" on the pack's glossy blue pill at the top centre (no coin bar), settings gear top right.
             var pillGo = new GameObject("LevelPill", typeof(RectTransform), typeof(Image));
             pillGo.transform.SetParent(canvasGo.transform, false);
             var pillRect = (RectTransform)pillGo.transform;
@@ -619,26 +621,37 @@ namespace PixelFlow.EditorTools
             levelRect.offsetMax = new Vector2(-20f, -4f);
             levelText.textWrappingMode = TextWrappingModes.NoWrap;
 
+            Button settingsButton = MetaUiBuilder.CreateGearButton(canvasGo.transform);
+
             GameObject winPanel = CreateResultPopup(canvasGo.transform, assets.VictoryPopup, "WinPanel", "NextButton",
                 "Next", out Button nextButton);
             GameObject losePanel = CreateResultPopup(canvasGo.transform, assets.DefeatPopup, "LosePanel", "RetryButton",
                 "Retry", out Button retryButton);
+            Button winHome = MetaUiBuilder.CreatePillButton(winPanel.transform, "HomeButton", "Home",
+                new Vector2(0.5f, 0.5f), new Vector2(0f, -210f), new Vector2(340f, 120f));
+            Button loseHome = MetaUiBuilder.CreatePillButton(losePanel.transform, "HomeButton", "Home",
+                new Vector2(0.5f, 0.5f), new Vector2(0f, -210f), new Vector2(340f, 120f));
+
+            settingsPopup = MetaUiBuilder.CreateSettingsPopup(canvasGo.transform, true);
 
             var hud = canvasGo.AddComponent<GameHudView>();
             var so = new SerializedObject(hud);
             so.FindProperty("levelText").objectReferenceValue = levelText;
             so.FindProperty("winPanel").objectReferenceValue = winPanel;
             so.FindProperty("losePanel").objectReferenceValue = losePanel;
-            SetSingle(so.FindProperty("retryButtons"), retryButton);
-            SetSingle(so.FindProperty("nextButtons"), nextButton);
+            SetArray(so.FindProperty("retryButtons"), retryButton);
+            SetArray(so.FindProperty("nextButtons"), nextButton);
+            SetArray(so.FindProperty("settingsButtons"), settingsButton);
+            SetArray(so.FindProperty("homeButtons"), winHome, loseHome);
             so.ApplyModifiedPropertiesWithoutUndo();
             return hud;
         }
 
-        private static void SetSingle(SerializedProperty array, Object value)
+        private static void SetArray(SerializedProperty array, params Object[] values)
         {
-            array.arraySize = 1;
-            array.GetArrayElementAtIndex(0).objectReferenceValue = value;
+            array.arraySize = values.Length;
+            for (int i = 0; i < values.Length; i++)
+                array.GetArrayElementAtIndex(i).objectReferenceValue = values[i];
         }
 
         /// <summary>
@@ -714,17 +727,6 @@ namespace PixelFlow.EditorTools
             text.color = Color.white;
             text.raycastTarget = false;
             return text;
-        }
-
-        private static void AddSceneToBuildSettings()
-        {
-            var scenes = new List<EditorBuildSettingsScene> { new EditorBuildSettingsScene(ScenePath, true) };
-            foreach (EditorBuildSettingsScene existing in EditorBuildSettings.scenes)
-            {
-                if (existing.path != ScenePath)
-                    scenes.Add(existing);
-            }
-            EditorBuildSettings.scenes = scenes.ToArray();
         }
     }
 }

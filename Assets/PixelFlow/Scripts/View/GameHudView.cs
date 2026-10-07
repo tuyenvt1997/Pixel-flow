@@ -7,7 +7,8 @@ namespace PixelFlow.View
 {
     /// <summary>
     /// uGUI heads-up display: a level label plus win and lose popups. Button clicks are forwarded as
-    /// <see cref="OnRetryClicked"/> / <see cref="OnNextClicked"/>; the view holds no game logic.
+    /// <see cref="OnRetryClicked"/> / <see cref="OnNextClicked"/> / <see cref="OnSettingsClicked"/> /
+    /// <see cref="OnHomeClicked"/>; the view holds no game logic.
     /// All serialized references are optional so the scene builder can wire only what it creates.
     /// </summary>
     public sealed class GameHudView : MonoBehaviour
@@ -27,8 +28,16 @@ namespace PixelFlow.View
         [Tooltip("Buttons that advance to the next level (e.g. on the win popup).")]
         [SerializeField] private Button[] nextButtons;
 
+        [Tooltip("Buttons that open the settings popup (e.g. the HUD gear).")]
+        [SerializeField] private Button[] settingsButtons;
+
+        [Tooltip("Buttons that return to the menu (e.g. on the win and lose popups).")]
+        [SerializeField] private Button[] homeButtons;
+
         private UnityEngine.Events.UnityAction _retryHandler;
         private UnityEngine.Events.UnityAction _nextHandler;
+        private UnityEngine.Events.UnityAction _settingsHandler;
+        private UnityEngine.Events.UnityAction _homeHandler;
 
         /// <summary>
         /// Raised when any retry button is clicked.
@@ -40,18 +49,34 @@ namespace PixelFlow.View
         /// </summary>
         public event Action OnNextClicked;
 
+        /// <summary>
+        /// Raised when any settings button is clicked.
+        /// </summary>
+        public event Action OnSettingsClicked;
+
+        /// <summary>
+        /// Raised when any home button is clicked.
+        /// </summary>
+        public event Action OnHomeClicked;
+
         private void Awake()
         {
             _retryHandler = HandleRetry;
             _nextHandler = HandleNext;
+            _settingsHandler = HandleSettings;
+            _homeHandler = HandleHome;
             AddListeners(retryButtons, _retryHandler);
             AddListeners(nextButtons, _nextHandler);
+            AddListeners(settingsButtons, _settingsHandler);
+            AddListeners(homeButtons, _homeHandler);
         }
 
         private void OnDestroy()
         {
             RemoveListeners(retryButtons, _retryHandler);
             RemoveListeners(nextButtons, _nextHandler);
+            RemoveListeners(settingsButtons, _settingsHandler);
+            RemoveListeners(homeButtons, _homeHandler);
         }
 
         /// <summary>
@@ -99,6 +124,16 @@ namespace PixelFlow.View
         private void HandleNext()
         {
             OnNextClicked?.Invoke();
+        }
+
+        private void HandleSettings()
+        {
+            OnSettingsClicked?.Invoke();
+        }
+
+        private void HandleHome()
+        {
+            OnHomeClicked?.Invoke();
         }
 
         private static void SetActive(GameObject go, bool active)

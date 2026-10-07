@@ -4,6 +4,7 @@ using NUnit.Framework;
 using PixelFlow.Controller;
 using PixelFlow.Core;
 using PixelFlow.Data;
+using PixelFlow.Meta;
 using PixelFlow.View;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -445,7 +446,8 @@ namespace PixelFlow.Tests
 
         /// <summary>
         /// Starter level 1 (the 8x8 heart, loaded on scene start) is won with the <c>AutoPlayer</c> policy driven
-        /// through the controller's launch hooks, and a mid-game capture is written to Logs/level1_capture.png.
+        /// through the controller's launch hooks, a mid-game capture is written to Logs/level1_capture.png, and the
+        /// stored progress advances to level 2.
         /// </summary>
         [UnityTest]
         public IEnumerator Level1_AutoPlay_ReachesWon()
@@ -480,6 +482,8 @@ namespace PixelFlow.Tests
             Assert.AreEqual(0, _controller.Session.Grid.RemainingCount);
             Assert.IsTrue(captured, "No mid-game capture was taken.");
             Assert.IsTrue(Panel("WinPanel").activeSelf, "Win popup not shown.");
+            Assert.AreEqual(1, _controller.CurrentLevelNumber);
+            Assert.AreEqual(2, MetaServices.Progress.LevelNumber, "Winning level 1 should store level 2 as next.");
             Debug.Log($"[PlayTests] Level 1 won in {Time.realtimeSinceStartup - start:F1} s real time.");
         }
 
@@ -722,6 +726,8 @@ namespace PixelFlow.Tests
 
         private IEnumerator LoadGameScene()
         {
+            // Keep tests off the real PlayerPrefs: a fresh store makes Start load level 1 (index 0).
+            MetaServices.Use(new MemoryStore());
 #if UNITY_EDITOR
             yield return EditorSceneManager.LoadSceneAsyncInPlayMode(ScenePath, new LoadSceneParameters(LoadSceneMode.Single));
 #else

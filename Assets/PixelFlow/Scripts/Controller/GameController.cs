@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using PixelFlow.Core;
 using PixelFlow.Data;
+using PixelFlow.Meta;
 using PixelFlow.Performance;
 using PixelFlow.View;
 using UnityEngine;
@@ -18,6 +19,9 @@ namespace PixelFlow.Controller
     /// every board size) and pushes the belt clock (ticks plus tick phase, <see cref="BeltView.SetBeltClock"/>) the
     /// belt tanks and chevrons are animated with, every shot becomes a projectile, arrivals are queued and destroyed under a per-frame
     /// budget, and the game ends (HUD popup) once the belt rules report Won/Lost and nothing is still in flight.
+    /// Levels are addressed by an unbounded 1-based level number (data index <c>(number - 1) % LevelCount</c>):
+    /// <c>Start</c> plays <see cref="PlayerProgress.LevelNumber"/>, a win advances the stored progress, Next plays
+    /// the following number. The game is paused while the settings popup is open; Home returns to the menu.
     /// Nothing is instantiated or allocated per frame; all handlers are cached delegates.
     /// </summary>
     public sealed class GameController : MonoBehaviour
@@ -66,6 +70,9 @@ namespace PixelFlow.Controller
         [Tooltip("Level label and win/lose popups.")]
         [SerializeField] private GameHudView hud;
 
+        [Tooltip("Optional settings popup opened by the HUD gear; the game is paused while it is open.")]
+        [SerializeField] private SettingsPopup settingsPopup;
+
         [Tooltip("Camera used for tap raycasts.")]
         [SerializeField] private Camera cam;
 
@@ -90,6 +97,8 @@ namespace PixelFlow.Controller
         private Action<PixelCellView> _onCellFinished;
         private Action _onRetry;
         private Action _onNext;
+        private Action _onSettings;
+        private Action _onHome;
 
         private LevelSession _session;
         private LevelData _currentData;
@@ -98,6 +107,7 @@ namespace PixelFlow.Controller
         private float _tickInterval;
         private int _beltTicks;
         private int _currentIndex;
+        private int _levelNumber = 1;
         private GameState _result;
         private readonly Stopwatch _loadWatch = new Stopwatch();
 
@@ -123,6 +133,17 @@ namespace PixelFlow.Controller
         /// Index into the levels array of the level last loaded with <see cref="LoadLevel(int)"/>.
         /// </summary>
         public int CurrentLevelIndex => _currentIndex;
+
+        /// <summary>
+        /// 1-based, unbounded number of the loaded level (shown on the HUD; <see cref="LoadLevel(int)"/> sets it to
+        /// index + 1).
+        /// </summary>
+        public int CurrentLevelNumber => _levelNumber;
+
+        /// <summary>
+        /// True while the settings popup is open: the belt does not tick and taps are ignored.
+        /// </summary>
+        public bool IsPaused => settingsPopup != null && settingsPopup.IsOpen;
 
         /// <summary>
         /// Number of levels in the levels array (0 if none are assigned).
@@ -163,6 +184,8 @@ namespace PixelFlow.Controller
             _onCellFinished = HandleCellFinished;
             _onRetry = HandleRetry;
             _onNext = HandleNext;
+            _onSettings = HandleSettings;
+            _onHome = SceneFlow.LoadMenu;
 
             Transform cellParent = transform;
             _cellPool = new ObjectPool<PixelCellView>(
@@ -181,12 +204,16 @@ namespace PixelFlow.Controller
             projectiles.OnArrived += _onArrived;
             hud.OnRetryClicked += _onRetry;
             hud.OnNextClicked += _onNext;
+            hud.OnSettingsClicked += _onSettings;
+            hud.OnHomeClicked += _onHome;
+            if (settingsPopup != null)
+                settingsPopup.OnHomeClicked += _onHome;
         }
 
         private void Start()
         {
             if (_session == null && levels != null && levels.Length > 0)
-                LoadLevel(0);
+                LoadLevelNumber(MetaServices.Progress.LevelNumber);
         }
 
         private void OnDestroy()
@@ -197,7 +224,11 @@ namespace PixelFlow.Controller
             {
                 hud.OnRetryClicked -= _onRetry;
                 hud.OnNextClicked -= _onNext;
+                hud.OnSettingsClicked -= _onSettings;
+                hud.OnHomeClicked -= _onHome;
             }
+            if (settingsPopup != null)
+                settingsPopup.OnHomeClicked -= _onHome;
             if (tankBoard != null)
                 tankBoard.Clear();
             if (beltView != null)
@@ -218,13 +249,31 @@ namespace PixelFlow.Controller
             if (levels == null || index < 0 || index >= levels.Length)
                 throw new ArgumentOutOfRangeException(nameof(index));
 
-            Load(levels[index], index);
+            Load(levels[index], index, index + 1);
+        }
+
+        /// <summary>
+        /// Loads the level with the 1-based, unbounded <paramref name="levelNumber"/>: the data is
+        /// <c>levels[(levelNumber - 1) % LevelCount]</c> (so the levels wrap around) and the HUD shows the number.
+        /// Otherwise the same as <see cref="LoadLevel(int)"/>.
+        /// </summary>
+        /// <param name="levelNumber">1-based level number (values below 1 load level 1).</param>
+        /// <exception cref="InvalidOperationException">Thrown if no levels are assigned.</exception>
+        /// <exception cref="ArgumentException">Thrown if the level data is invalid (see <see cref="LevelSession.Create"/>).</exception>
+        public void LoadLevelNumber(int levelNumber)
+        {
+            if (levels == null || levels.Length == 0)
+                throw new InvalidOperationException("No levels assigned.");
+
+            levelNumber = Mathf.Max(1, levelNumber);
+            int index = PlayerProgress.IndexOf(levelNumber, levels.Length);
+            Load(levels[index], index, levelNumber);
         }
 
         /// <summary>
         /// Loads an arbitrary level (e.g. one created at runtime by a test) with the same steps as
-        /// <see cref="LoadLevel(int)"/>. Retry reloads this level; the HUD label shows
-        /// <see cref="CurrentLevelIndex"/> + 1.
+        /// <see cref="LoadLevel(int)"/>. Retry reloads this level; the HUD label keeps showing
+        /// <see cref="CurrentLevelNumber"/>.
         /// </summary>
         /// <param name="data">Level to load.</param>
         /// <exception cref="ArgumentNullException">Thrown if data is null.</exception>
@@ -233,10 +282,10 @@ namespace PixelFlow.Controller
         /// </exception>
         public void LoadLevel(LevelData data)
         {
-            Load(data, _currentIndex);
+            Load(data, _currentIndex, _levelNumber);
         }
 
-        private void Load(LevelData data, int index)
+        private void Load(LevelData data, int index, int levelNumber)
         {
             if (data == null)
                 throw new ArgumentNullException(nameof(data));
@@ -248,6 +297,7 @@ namespace PixelFlow.Controller
             LevelSession session = LevelSession.Create(data);
 
             _currentIndex = index;
+            _levelNumber = levelNumber;
             projectiles.ClearAll();
             _destroyQueue.Clear();
             ReleaseActiveCells();
@@ -265,7 +315,7 @@ namespace PixelFlow.Controller
             gridRenderer.Build(_session.Grid, _session.Palette, _layout);
             beltView.Build(path, _layout);
             tankBoard.Build(_session, beltView);
-            hud.SetLevel(_currentIndex + 1);
+            hud.SetLevel(_levelNumber);
             hud.HideAll();
             _tickTimer = 0f;
             _beltTicks = 0;
@@ -325,7 +375,7 @@ namespace PixelFlow.Controller
 
         private void Update()
         {
-            if (State != GameState.Playing || _session == null)
+            if (State != GameState.Playing || _session == null || IsPaused)
                 return;
 
             // Once the rules report a result it is latched: the belt stops and input is ignored while the
@@ -346,9 +396,15 @@ namespace PixelFlow.Controller
             {
                 State = _result;
                 if (_result == GameState.Won)
+                {
+                    MetaServices.Progress.CompleteLevel(_levelNumber);
                     hud.ShowWin();
+                }
                 else
+                {
                     hud.ShowLose();
+                }
+                MetaServices.Settings.TryVibrate();
             }
         }
 
@@ -477,7 +533,13 @@ namespace PixelFlow.Controller
         {
             if (levels == null || levels.Length == 0)
                 return;
-            LoadLevel((_currentIndex + 1) % levels.Length);
+            LoadLevelNumber(_levelNumber + 1);
+        }
+
+        private void HandleSettings()
+        {
+            if (settingsPopup != null)
+                settingsPopup.Open();
         }
     }
 }

@@ -1,13 +1,9 @@
 {
-    "name": "PixelFlow.Controller",
-    "rootNamespace": "PixelFlow.Controller",
+    "name": "PixelFlow.Meta",
+    "rootNamespace": "PixelFlow.Meta",
     "references": [
-        "PixelFlow.Data",
-        "PixelFlow.Core",
-        "PixelFlow.Performance",
-        "PixelFlow.View",
-        "PixelFlow.Meta",
-        "Unity.InputSystem"
+        "Unity.TextMeshPro",
+        "UnityEngine.UI"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

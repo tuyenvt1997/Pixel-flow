@@ -7,6 +7,7 @@
         "PixelFlow.Performance",
         "PixelFlow.View",
         "PixelFlow.Controller",
+        "PixelFlow.Meta",
         "Unity.TextMeshPro",
         "Unity.InputSystem",
         "UnityEngine.UI"

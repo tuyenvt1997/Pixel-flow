@@ -4,6 +4,7 @@ using System.Text;
 using NUnit.Framework;
 using PixelFlow.Controller;
 using PixelFlow.Core;
+using PixelFlow.Meta;
 using PixelFlow.View;
 using Unity.Profiling;
 using UnityEngine;
@@ -88,6 +89,7 @@ namespace PixelFlow.Tests
         [UnityTest]
         public IEnumerator SteadyStateShooting_NoGCAllocPerFrame_AndFrameBudget()
         {
+            MetaServices.Use(new MemoryStore());
 #if UNITY_EDITOR
             yield return EditorSceneManager.LoadSceneAsyncInPlayMode(ScenePath, new LoadSceneParameters(LoadSceneMode.Single));
 #else
