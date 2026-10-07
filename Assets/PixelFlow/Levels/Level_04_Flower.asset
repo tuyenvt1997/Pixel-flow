@@ -1,0 +1,75 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c6a923974fd630045ba73af73368f375, type: 3}
+  m_Name: Level_04_Flower
+  m_EditorClassIdentifier: 
+  width: 24
+  height: 24
+  palette:
+  - serializedVersion: 2
+    rgba: 4288700652
+  - serializedVersion: 2
+    rgba: 4278240511
+  - serializedVersion: 2
+    rgba: 4285184870
+  - serializedVersion: 2
+    rgba: 4281498926
+  cells: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff03030303ff0202ffffffffffffffffffffffffffffff030303030303030202ffffffffffffffffffffffffffffff030303030303030202030303030303ffffffffffffffffffffff03030303ff020203030303030303ffffffffffffffffffffffffffffff0202030303030303ffffffffffffffffffffffffffffffff0202ffffffffffffffffffffffffffffffffffff000000ff0202ff000000ffffffffffffffffffffffffff000000000002020000000000ffffffffffffffffffffff0000000000000000000000000000ffffffffffffffffffff0000000000000000000000000000ffffffffffffffffffffff0000000000ffff0000000000ffffffffffffffffffffffff000000000101010100000000ffffffffffffffffffffffffffffff010101010101ffffffffffffffffffffffffff00000000000101010101010000000000ffffffffffffff000000000000010101010101000000000000ffffffffffff000000000000010101010101000000000000ffffffffffff000000000000000101010100000000000000ffffffffffffff0000000000ff00000000ff0000000000ffffffffffffffffff000000ff000000000000ff000000ffffffffffffffffffffffffffff000000000000ffffffffffffffffffffffffffffffffffff000000000000ffffffffffffffffffffffffffffffffffff000000000000ffffffffffffffffffffffffffffffffffffff00000000ffffffffffffffffffff
+  tanks:
+  - colorId: 0
+    ammo: 12
+  - colorId: 3
+    ammo: 12
+  - colorId: 2
+    ammo: 12
+  - colorId: 3
+    ammo: 12
+  - colorId: 1
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 3
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 2
+    ammo: 4
+  - colorId: 3
+    ammo: 5
+  - colorId: 0
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 1
+    ammo: 12
+  - colorId: 0
+    ammo: 12
+  - colorId: 1
+    ammo: 8
+  - colorId: 0
+    ammo: 2
+  laneCount: 3
+  slotCount: 5

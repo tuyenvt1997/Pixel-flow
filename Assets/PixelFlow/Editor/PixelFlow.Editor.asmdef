@@ -1,0 +1,26 @@
+{
+    "name": "PixelFlow.Editor",
+    "rootNamespace": "PixelFlow.EditorTools",
+    "references": [
+        "PixelFlow.Data",
+        "PixelFlow.Core",
+        "PixelFlow.Performance",
+        "PixelFlow.View",
+        "PixelFlow.Controller",
+        "PixelFlow.Meta",
+        "Unity.TextMeshPro",
+        "Unity.InputSystem",
+        "UnityEngine.UI"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

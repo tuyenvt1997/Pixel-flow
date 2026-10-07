@@ -1,0 +1,53 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c6a923974fd630045ba73af73368f375, type: 3}
+  m_Name: Level_02_Mushroom
+  m_EditorClassIdentifier: 
+  width: 12
+  height: 12
+  palette:
+  - serializedVersion: 2
+    rgba: 4281282515
+  - serializedVersion: 2
+    rgba: 4294310650
+  - serializedVersion: 2
+    rgba: 4288729071
+  cells: ffffffffffffffffffffffffffffff020202020202ffffffffffff020202020202ffffffffffffff02020202ffffffffffffffff02020202ffffffff000000000000000000000000000001000000000000010000000101010000000001010100ff00010000010100000100ffff00000001010101000000ffffff0000000101000000ffffffffffff00000000ffffffff
+  tanks:
+  - colorId: 0
+    ammo: 8
+  - colorId: 2
+    ammo: 8
+  - colorId: 2
+    ammo: 8
+  - colorId: 0
+    ammo: 8
+  - colorId: 1
+    ammo: 8
+  - colorId: 0
+    ammo: 8
+  - colorId: 0
+    ammo: 8
+  - colorId: 2
+    ammo: 4
+  - colorId: 0
+    ammo: 8
+  - colorId: 1
+    ammo: 8
+  - colorId: 0
+    ammo: 8
+  - colorId: 1
+    ammo: 2
+  - colorId: 0
+    ammo: 2
+  laneCount: 2
+  slotCount: 5

@@ -1,0 +1,21 @@
+{
+    "name": "PixelFlow.Controller",
+    "rootNamespace": "PixelFlow.Controller",
+    "references": [
+        "PixelFlow.Data",
+        "PixelFlow.Core",
+        "PixelFlow.Performance",
+        "PixelFlow.View",
+        "PixelFlow.Meta",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

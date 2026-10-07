@@ -1,0 +1,29 @@
+{
+    "name": "PixelFlow.Tests.EditMode",
+    "rootNamespace": "PixelFlow.Tests",
+    "references": [
+        "PixelFlow.Data",
+        "PixelFlow.Core",
+        "PixelFlow.Performance",
+        "PixelFlow.View",
+        "PixelFlow.Meta",
+        "PixelFlow.Editor",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

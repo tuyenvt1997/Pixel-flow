@@ -1,0 +1,176 @@
+using System.Collections.Generic;
+using System.Diagnostics;
+using NUnit.Framework;
+using PixelFlow.Core;
+using PixelFlow.Data;
+using UnityEngine;
+using Debug = UnityEngine.Debug;
+using Object = UnityEngine.Object;
+
+namespace PixelFlow.Tests
+{
+    /// <summary>
+    /// Stress tests on a procedural 100x50 (5000 cells) level: per-tick CPU time and steady-state allocations
+    /// of the conveyor-belt shooting loop, played by <see cref="AutoPlayer"/>.
+    /// </summary>
+    public sealed class StressTests
+    {
+        private const int Width = 100;
+        private const int Height = 50;
+        private const int ColorCount = 8;
+        private const int AmmoPerTank = 20;
+        private const int WarmupTicks = 10;
+        private const int MaxTicks = 500000;
+
+        private LevelData _level;
+
+        /// <summary>
+        /// Builds the procedural level used by every test.
+        /// </summary>
+        [SetUp]
+        public void SetUp()
+        {
+            _level = CreateStressLevel();
+        }
+
+        /// <summary>
+        /// Destroys the procedural level asset.
+        /// </summary>
+        [TearDown]
+        public void TearDown()
+        {
+            if (_level != null)
+                Object.DestroyImmediate(_level);
+        }
+
+        /// <summary>
+        /// Auto-plays the 5000-cell level to a win with <see cref="AutoPlayer.Step"/>; the average time of one
+        /// bot tick (launch plus <see cref="BeltShootingLogic.Tick"/>) must be under 2 ms.
+        /// </summary>
+        [Test]
+        public void Stress_5000Cells_FullAutoPlay_StepsUnder2msAverage()
+        {
+            LevelSession s = LevelSession.Create(_level);
+            var shots = new List<ShotEvent>(s.Belt.Capacity);
+            long tickTicks = 0;
+            int tickCount = 0;
+            int shotCount = 0;
+
+            GameState state = Evaluate(s);
+            for (int i = 0; i < MaxTicks && state == GameState.Playing; i++)
+            {
+                long t0 = Stopwatch.GetTimestamp();
+                shotCount += AutoPlayer.Step(s, shots);
+                tickTicks += Stopwatch.GetTimestamp() - t0;
+                tickCount++;
+                state = Evaluate(s);
+            }
+
+            double avgMs = tickCount > 0 ? tickTicks * 1000.0 / Stopwatch.Frequency / tickCount : 0.0;
+            Debug.Log($"[StressTests] {Width * Height} cells, {_level.tanks.Length} tanks: {tickCount} ticks, " +
+                      $"{shotCount} shots, total {tickTicks * 1000.0 / Stopwatch.Frequency:F3} ms, " +
+                      $"avg {avgMs * 1000.0:F2} us/tick.");
+
+            Assert.AreEqual(GameState.Won, state);
+            Assert.AreEqual(0, s.Grid.RemainingCount);
+            Assert.AreEqual(Width * Height, shotCount);
+            Assert.Less(avgMs, 2.0, "Average belt tick time exceeds 2 ms.");
+        }
+
+        /// <summary>
+        /// After the first 10 ticks, the full belt auto-play loop (bot launch, belt tick, rules evaluation)
+        /// allocates no GC memory until the level is won.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="AllocAssert.NoAlloc"/> runs the action once unmeasured, then measures it up to
+        /// <see cref="AllocAssert.MaxAttempts"/> times. Every run plays its own pre-warmed session to the end (the
+        /// first one is the unmeasured warm-up), so each measured call plays a full level (indexing an array and
+        /// incrementing a counter do not allocate).
+        /// </remarks>
+        [Test]
+        public void Stress_FullAutoPlay_NoAllocationInSteadyState()
+        {
+            var sessions = new LevelSession[AllocAssert.MaxAttempts + 1];
+            for (int i = 0; i < sessions.Length; i++)
+                sessions[i] = LevelSession.Create(_level);
+            var shots = new List<ShotEvent>(sessions[0].Belt.Capacity);
+
+            for (int i = 0; i < WarmupTicks; i++)
+            {
+                for (int j = 0; j < sessions.Length; j++)
+                    PlayTick(sessions[j], shots);
+            }
+
+            int runs = 0;
+            var states = new GameState[sessions.Length];
+            AllocAssert.NoAlloc(() =>
+            {
+                LevelSession current = sessions[runs];
+                GameState state = GameState.Playing;
+                for (int i = 0; i < MaxTicks; i++)
+                {
+                    state = PlayTick(current, shots);
+                    if (state != GameState.Playing)
+                        break;
+                }
+                states[runs] = state;
+                runs++;
+            });
+
+            Assert.GreaterOrEqual(runs, 2, "No measured session was played.");
+            for (int i = 0; i < runs; i++)
+            {
+                Assert.AreEqual(GameState.Won, states[i], $"Session {i} was not won.");
+                Assert.AreEqual(0, sessions[i].Grid.RemainingCount, $"Session {i} has pixels left.");
+            }
+        }
+
+        /// <summary>
+        /// One auto-play tick: <see cref="AutoPlayer.Step"/>, then the belt rules.
+        /// </summary>
+        private static GameState PlayTick(LevelSession s, List<ShotEvent> shots)
+        {
+            AutoPlayer.Step(s, shots);
+            return Evaluate(s);
+        }
+
+        private static GameState Evaluate(LevelSession s)
+        {
+            return GameRules.Evaluate(s.Grid, s.Belt, s.Tray, s.Supply, s.BeltShooting);
+        }
+
+        /// <summary>
+        /// 100x50 level with 8 colours in diagonal bands broken up by a hash pattern (no empty cells), tanks from
+        /// <see cref="TankGenerator.Generate"/>, 3 lanes and one belt place and waiting slot per tank, so no lap can
+        /// overflow the waiting slots and it is always solvable.
+        /// </summary>
+        private static LevelData CreateStressLevel()
+        {
+            var cells = new byte[Width * Height];
+            for (int y = 0; y < Height; y++)
+            {
+                for (int x = 0; x < Width; x++)
+                {
+                    uint h = (uint)(x * 73856093) ^ (uint)(y * 19349663);
+                    int band = (x + y) / 7;
+                    cells[y * Width + x] = (byte)((band + (h % 3 == 0 ? 3 : 0)) % ColorCount);
+                }
+            }
+
+            var palette = new Color32[ColorCount];
+            for (int i = 0; i < ColorCount; i++)
+                palette[i] = Color.HSVToRGB(i / (float)ColorCount, 0.8f, 0.9f);
+
+            var level = ScriptableObject.CreateInstance<LevelData>();
+            level.name = "StressLevel_100x50";
+            level.width = Width;
+            level.height = Height;
+            level.palette = palette;
+            level.cells = cells;
+            level.tanks = TankGenerator.Generate(Width, Height, cells, AmmoPerTank);
+            level.laneCount = 3;
+            level.slotCount = level.tanks.Length;
+            return level;
+        }
+    }
+}
