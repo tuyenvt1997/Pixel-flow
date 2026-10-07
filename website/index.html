@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pixel Flow — Unity puzzle game showcase</title>
+  <meta name="description" content="Pixel Flow: a casual conveyor-belt pixel puzzle built in Unity 6 with GPU instancing, zero-allocation gameplay and 140+ automated tests.">
+  <meta property="og:title" content="Pixel Flow — Unity puzzle game showcase">
+  <meta property="og:description" content="A casual conveyor-belt pixel puzzle built in Unity 6. Gameplay video, rules and engineering notes.">
+  <meta property="og:type" content="website">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="hero">
+    <div class="cubes" aria-hidden="true">
+      <span class="cube c1"></span><span class="cube c2"></span><span class="cube c3"></span>
+      <span class="cube c4"></span><span class="cube c5"></span><span class="cube c6"></span>
+    </div>
+    <div class="wrap hero-inner">
+      <p class="eyebrow">Unity 6 · C# · Mobile puzzle</p>
+      <h1 class="logo"><span class="logo-pixel">PIXEL</span> <span class="logo-flow">FLOW</span></h1>
+      <p class="tagline">A super-casual puzzle where colour tanks ride a conveyor belt around a pixel-art picture and shoot away every matching pixel on its outer edge.</p>
+      <div class="cta">
+        <a class="btn btn-yellow" href="#gameplay">Watch gameplay</a>
+        <a class="btn btn-ghost" href="https://github.com/tuyenvt1997/Pixel-flow" target="_blank" rel="noopener">View source on GitHub</a>
+      </div>
+      <ul class="stats">
+        <li><strong>6</strong><span>hand-made levels</span></li>
+        <li><strong>4,096</strong><span>pixels on the largest board</span></li>
+        <li><strong>0 B</strong><span>GC alloc per frame</span></li>
+        <li><strong>140+</strong><span>automated tests</span></li>
+      </ul>
+    </div>
+  </header>
+
+  <main>
+
+    <section id="gameplay" class="section">
+      <div class="wrap split">
+        <div class="phone">
+          <video src="assets/gameplay.mp4" controls muted playsinline loop preload="metadata" width="488" height="626">
+            Your browser does not support embedded video. <a href="assets/gameplay.mp4">Download the gameplay video</a>.
+          </video>
+        </div>
+        <div class="split-text">
+          <h2>Gameplay</h2>
+          <p>A 70-second capture from the Unity build, showing real levels being cleared as tanks circle the board.</p>
+          <p>The game flows <b>Loading → Menu → Game</b>, with level progress saved between sessions and a settings popup for music, sound effects and vibration.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="rules" class="section alt">
+      <div class="wrap">
+        <h2>How it plays</h2>
+        <div class="cards">
+          <article class="card">
+            <div class="card-num">1</div>
+            <h3>Launch a tank</h3>
+            <p>Tap a colour tank from a supply lane or a waiting slot. It joins the belt if the belt has room. The <b>x/5</b> counter shows the belt's capacity.</p>
+          </article>
+          <article class="card">
+            <div class="card-num">2</div>
+            <h3>Ride the belt</h3>
+            <p>The belt loops around all four sides of the picture. At each stop, the tank fires inward at the first pixel in that row or column, but only if that pixel matches its colour.</p>
+          </article>
+          <article class="card">
+            <div class="card-num">3</div>
+            <h3>Park or run dry</h3>
+            <p>A tank leaves when its ammo runs out. If it finishes a full lap with ammo left, it parks in one of <b>5 waiting slots</b> so you can launch it again later.</p>
+          </article>
+          <article class="card">
+            <div class="card-num">4</div>
+            <h3>Clear the picture</h3>
+            <p>Destroy every pixel to win. You lose if a tank needs a slot while all five are full, or if none of the parked colours can reach any pixel.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="engineering" class="section">
+      <div class="wrap">
+        <h2>Engineering highlights</h2>
+        <p class="lead">I built the game to stay smooth on mobile at any board size. Every claim below is checked by an automated test.</p>
+        <div class="features">
+          <article class="feature">
+            <h3>GPU-instanced board</h3>
+            <p>The whole pixel board is drawn with <code>Graphics.RenderMeshInstanced</code>, with one cube instance per pixel and a custom instanced colour shader. A 64×64 picture is a few draw calls, not 4,096 GameObjects.</p>
+          </article>
+          <article class="feature">
+            <h3>Zero-allocation gameplay</h3>
+            <p>A custom <code>ObjectPool</code>, a time-sliced <code>TimeSlicedQueue</code> and pre-sized buffers keep the hot path free of allocations. A PlayMode test reads the profiler and requires <b>0 B GC alloc in each of 240 frames</b> while the largest level is busy.</p>
+          </article>
+          <article class="feature">
+            <h3>O(1) four-sided fronts</h3>
+            <p><code>PixelGridModel</code> keeps a front pointer for every row and column on all four sides, plus a per-colour counter. Finding a tank's target and checking whether a colour can still hit anything are both constant time.</p>
+          </article>
+          <article class="feature">
+            <h3>Fixed-tick belt simulation</h3>
+            <p>The belt is a loop of <code>2W + 2H</code> discrete positions. A lap always takes 4 s, so the tick is <code>4 / L</code> seconds, and the controller catches up with up to 16 ticks per frame. The views interpolate between ticks so motion stays smooth.</p>
+          </article>
+          <article class="feature">
+            <h3>Data-driven levels</h3>
+            <p>Levels are saved as run-length-encoded binary or JSON and validated on load. A tank generator orders ammo to match how the belt sweeps the board, and an editor Level Baker turns any texture into a pixel level through colour quantization and tank generation.</p>
+          </article>
+          <article class="feature">
+            <h3>Generated scenes</h3>
+            <p>Editor builders generate the Loading, Menu and Game scenes, the HUD and the popups from code. The scenes can be rebuilt any time without manual scene edits.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture" class="section alt">
+      <div class="wrap">
+        <h2>Architecture</h2>
+        <p class="lead">The code is split into layers by assembly definitions. The rules are plain C# with no <code>MonoBehaviour</code>, so they can be tested without a running game.</p>
+        <div class="arch" role="img" aria-label="Layer diagram: Data feeds Core; View and Controller build on Core; Meta sits on top for scenes, progress and settings.">
+          <div class="layer l-meta"><b>Meta</b><span>Scene flow · player progress · settings · key/value store</span></div>
+          <div class="layer-row">
+            <div class="layer l-view"><b>View</b><span>Instanced board · belt · tanks · projectiles · debris FX · HUD</span></div>
+            <div class="layer l-ctrl"><b>Controller</b><span>GameController: tick clock, input, win / lose latch</span></div>
+          </div>
+          <div class="layer l-core"><b>Core</b><span>PixelGridModel · BeltModel · BeltShootingLogic · GameRules · LevelSession</span></div>
+          <div class="layer l-data"><b>Data &amp; Performance</b><span>LevelData · RLE / JSON serializer · ObjectPool · TimeSlicedQueue</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="stack" class="section">
+      <div class="wrap two-col">
+        <div>
+          <h2>Tech stack</h2>
+          <ul class="chips">
+            <li>Unity 6 (6000.0 LTS)</li>
+            <li>C#</li>
+            <li>Universal Render Pipeline</li>
+            <li>Custom HLSL shaders</li>
+            <li>TextMeshPro</li>
+            <li>uGUI</li>
+            <li>Unity Test Framework</li>
+            <li>Unity Profiler API</li>
+          </ul>
+        </div>
+        <div>
+          <h2>Testing</h2>
+          <ul class="checks">
+            <li><b>126 EditMode tests</b> cover the grid model, belt rules, shooting, serialization, level tools, progress and settings.</li>
+            <li><b>15 PlayMode tests</b> drive the real Game scene: tap-to-launch, overflow and the lose latch, auto-play to a win on the first and largest levels, cycling through all six levels, retry, and level-load time under 1 s.</li>
+            <li><b>Stress test:</b> auto-plays a 5,000-cell board, with an average belt tick under 2 ms.</li>
+            <li><b>Frame budget:</b> on the 64×64 level, the main thread stays under 16.6 ms with 0 B GC per frame.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <div class="wrap">
+      <p><span class="logo-pixel">PIXEL</span> <span class="logo-flow">FLOW</span> — a Unity portfolio project.</p>
+      <p><a href="https://github.com/tuyenvt1997/Pixel-flow" target="_blank" rel="noopener">github.com/tuyenvt1997/Pixel-flow</a></p>
+    </div>
+  </footer>
+
+</body>
+</html>
